@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "crates/crypto-store",
+    "crates/rdp-core",
+    "crates/sync-pg",
+    "apps/android-client",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0-only"
+authors = ["RemoteAPP contributors"]
+
+[workspace.dependencies]
+argon2 = "0.5.3"
+base64 = "0.22.1"
+chacha20poly1305 = "0.10.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+slint = "1.17.1"
+slint-build = "1.17.1"
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.41"
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+zeroize = { version = "1.8.2", features = ["derive"] }
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,35 @@
+[package]
+name = "remoteapp-rdp-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["ironrdp"]
+ironrdp = [
+    "dep:ironrdp-client",
+    "dep:ironrdp-core",
+    "dep:ironrdp-input",
+    "dep:ironrdp-pdu",
+    "dep:ironrdp-cliprdr",
+    "dep:ironrdp-tls",
+    "dep:sha2",
+]
+
+[dependencies]
+serde.workspace = true
+sha2 = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+ironrdp-client = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-client", features = ["rustls", "clipboard"], optional = true }
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-core", optional = true }
+ironrdp-input = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-input", optional = true }
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-pdu", optional = true }
+ironrdp-cliprdr = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-cliprdr", optional = true }
+ironrdp-tls = { git = "https://github.com/Devolutions/IronRDP.git", rev = "4275b3d7fdf33c0aedeeb6bc9f58bfec83d0893d", package = "ironrdp-tls", features = ["rustls"], optional = true }

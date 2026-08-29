@@ -1,0 +1,108 @@
+import { Button, LineEdit, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "RemoteAPP";
+    width: 390px;
+    height: 760px;
+    background: #101318;
+
+    in-out property <string> host: "";
+    in-out property <string> username: "";
+    in-out property <string> password: "";
+    in-out property <string> clipboard: "";
+    in-out property <string> pending-fingerprint: "";
+    in property <string> status: "未连接";
+    in property <image> remote-image;
+
+    callback connect-requested();
+    callback disconnect-requested();
+    callback left-click();
+    callback right-click();
+    callback scroll(int);
+    callback touch-moved(float, float);
+    callback touch-tapped();
+    callback send-clipboard();
+    callback request-clipboard();
+    callback trust-certificate(string);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 10px;
+
+        Text {
+            text: "RemoteAPP";
+            color: #e8edf5;
+            font-size: 24px;
+        }
+        Text {
+            text: "Rust 原生 RDP · Android 8+";
+            color: #9ca8b8;
+        }
+
+        LineEdit { text <=> root.host; placeholder-text: "Windows 主机或 IP"; }
+        LineEdit { text <=> root.username; placeholder-text: "用户名"; }
+        LineEdit { text <=> root.password; placeholder-text: "密码"; input-type: InputType.password; }
+
+        HorizontalBox {
+            spacing: 8px;
+            Button { text: "连接"; clicked => { root.connect-requested(); } }
+            Button { text: "断开"; clicked => { root.disconnect-requested(); } }
+        }
+
+        Text { text: root.status; color: #7bd88f; }
+        Button {
+            text: "信任证书并重连";
+            visible: root.pending-fingerprint != "";
+            clicked => { root.trust-certificate(root.pending-fingerprint); }
+        }
+
+        Rectangle {
+            height: 230px;
+            background: #05070a;
+            border-width: 1px;
+            border-color: #263142;
+            clip: true;
+            Image {
+                source: root.remote-image;
+                width: parent.width;
+                height: parent.height;
+            }
+        }
+
+        Text { text: "触控板（按住移动，点击左键）"; color: #c9d2df; }
+        Rectangle {
+            height: 180px;
+            background: #1b2330;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: #344256;
+            ta := TouchArea {
+                moved => { root.touch-moved(self.mouse-x / 1px, self.mouse-y / 1px); }
+                clicked => { root.touch-tapped(); }
+            }
+            Text {
+                text: "TOUCHPAD";
+                color: #53647a;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: parent.width;
+                height: parent.height;
+            }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Button { text: "左键"; clicked => { root.left-click(); } }
+            Button { text: "右键"; clicked => { root.right-click(); } }
+            Button { text: "滚轮 ↑"; clicked => { root.scroll(120); } }
+            Button { text: "滚轮 ↓"; clicked => { root.scroll(-120); } }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; }
+            Button { text: "发送"; clicked => { root.send-clipboard(); } }
+            Button { text: "请求"; clicked => { root.request-clipboard(); } }
+        }
+    }
+}

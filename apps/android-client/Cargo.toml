@@ -1,0 +1,27 @@
+[package]
+name = "remoteapp-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "remoteapp-preview"
+path = "src/main.rs"
+
+[dependencies]
+remoteapp-rdp-core = { path = "../../crates/rdp-core" }
+slint = { workspace = true, features = ["backend-android-activity-06"] }
+tokio.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+
+[package.metadata.android]
+package_name = "com.remoteapp.client"
+label = "RemoteAPP"
+min_sdk_version = 26

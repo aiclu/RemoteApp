@@ -1,0 +1,13 @@
+/target/
+/Cargo.lock
+.idea/
+.vscode/
+*.iml
+*.apk
+*.aab
+*.keystore
+*.jks
+android-client/.gradle/
+apps/android-client/android/.cxx/
+apps/android-client/android/build/
+apps/android-client/android/app/build/
