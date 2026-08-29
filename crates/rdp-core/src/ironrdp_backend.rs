@@ -491,7 +491,7 @@ async fn map_output(
         }
         RdpOutputEvent::ConnectionFailure(error) => {
             warn!(error = %error, "RDP connection failed");
-            let message = error.to_string();
+            let message = error.report().to_string();
             let _ = events
                 .send(SessionEvent::Error(SessionError::Backend(message.clone())))
                 .await;

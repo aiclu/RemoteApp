@@ -34,3 +34,6 @@ opt-level = "z"
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+[patch."https://github.com/Devolutions/IronRDP.git"]
+ironrdp-tls = { path = "vendor/ironrdp-tls" }
