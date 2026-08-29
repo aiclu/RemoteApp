@@ -118,12 +118,17 @@ async fn run_session(
     let mut last_frame_sequence = 0_u64;
     let mut command_closed = false;
     let mut rdp_finished = false;
+    let mut user_disconnect_requested = false;
+    let mut terminal_reason = None;
 
     while !rdp_finished {
         tokio::select! {
             maybe_command = commands.recv(), if !command_closed => {
                 match maybe_command {
                     Some(command) => {
+                        if matches!(&command, SessionCommand::Disconnect) {
+                            user_disconnect_requested = true;
+                        }
                         if let Err(error) = dispatch_command(
                             command,
                             &input_sender,
@@ -143,18 +148,20 @@ async fn run_session(
             maybe_output = output_receiver.recv() => {
                 match maybe_output {
                     Some(output) => {
-                        if let Some(terminal) = map_output(
+                        if let Some(reason) = map_output(
                             output,
                             &events,
                             &mut last_frame_sequence,
                             rendering_suspended,
                         ).await {
-                            if terminal {
-                                rdp_finished = true;
-                            }
+                            terminal_reason = Some(reason);
+                            rdp_finished = true;
                         }
                     }
                     None => {
+                        terminal_reason = Some(DisconnectReason::Backend(
+                            "RDP output channel closed".into(),
+                        ));
                         rdp_finished = true;
                     }
                 }
@@ -162,11 +169,17 @@ async fn run_session(
             maybe_clipboard = clipboard_receiver.recv() => {
                 if let Some(message) = maybe_clipboard {
                     if input_sender.send_clipboard(message).is_err() {
+                        terminal_reason = Some(DisconnectReason::Backend(
+                            "clipboard channel closed".into(),
+                        ));
                         rdp_finished = true;
                     }
                 }
             }
             _ = &mut rdp_task => {
+                terminal_reason.get_or_insert_with(|| {
+                    DisconnectReason::Backend("RDP client stopped".into())
+                });
                 rdp_finished = true;
             }
         }
@@ -178,11 +191,12 @@ async fn run_session(
     if let Ok(mut text) = clipboard_text.lock() {
         text.clear();
     }
-    let _ = events
-        .send(SessionEvent::Disconnected {
-            reason: DisconnectReason::Backend("RDP session ended".into()),
-        })
-        .await;
+    let reason = if user_disconnect_requested {
+        DisconnectReason::UserRequested
+    } else {
+        terminal_reason.unwrap_or_else(|| DisconnectReason::Backend("RDP session ended".into()))
+    };
+    let _ = events.send(SessionEvent::Disconnected { reason }).await;
 }
 
 fn build_config(
@@ -408,7 +422,7 @@ async fn map_output(
     events: &mpsc::Sender<SessionEvent>,
     last_sequence: &mut u64,
     rendering_suspended: bool,
-) -> Option<bool> {
+) -> Option<DisconnectReason> {
     match output {
         RdpOutputEvent::Connected => {
             let _ = events
@@ -476,12 +490,11 @@ async fn map_output(
         }
         RdpOutputEvent::ConnectionFailure(error) => {
             warn!(error = %error, "RDP connection failed");
+            let message = error.to_string();
             let _ = events
-                .send(SessionEvent::Error(SessionError::Backend(
-                    error.to_string(),
-                )))
+                .send(SessionEvent::Error(SessionError::Backend(message.clone())))
                 .await;
-            Some(true)
+            Some(DisconnectReason::Backend(message))
         }
         RdpOutputEvent::MonitorLayout(monitors) => {
             if let Some((width, height)) = monitor_bounds(&monitors) {
@@ -491,7 +504,9 @@ async fn map_output(
         }
         RdpOutputEvent::Terminated(result) => {
             debug!(result = ?result, "RDP session terminated");
-            Some(true)
+            Some(DisconnectReason::Backend(format!(
+                "RDP client terminated: {result:?}"
+            )))
         }
         RdpOutputEvent::PointerDefault
         | RdpOutputEvent::PointerHidden

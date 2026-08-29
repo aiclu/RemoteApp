@@ -12,8 +12,8 @@ mod ironrdp_backend;
 
 pub use input::{InputQueue, KeyCode, MouseButton, TouchpadMapper};
 pub use model::{
-    CertificatePolicy, ConnectionProfile, DesktopConfig, FrameBuffer, FrameUpdate, PixelFormat,
-    ProfileId, Rect, ScaleMode, Secret,
+    CertificatePolicy, ConnectionProfile, DesktopConfig, EndpointParseError, FrameBuffer,
+    FrameUpdate, PixelFormat, ProfileId, Rect, ScaleMode, Secret, parse_endpoint,
 };
 pub use session::{
     DisconnectReason, ReconnectPolicy, SessionCommand, SessionError, SessionEvent, SessionHandle,

@@ -1,3 +1,4 @@
+import "./NotoSansSC-Regular.otf";
 import { Button, LineEdit, HorizontalBox, VerticalBox } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
@@ -5,6 +6,8 @@ export component MainWindow inherits Window {
     width: 390px;
     height: 760px;
     background: #101318;
+    default-font-family: "Noto Sans SC";
+    default-font-size: 16px;
 
     in-out property <string> host: "";
     in-out property <string> username: "";
@@ -39,7 +42,7 @@ export component MainWindow inherits Window {
             color: #9ca8b8;
         }
 
-        LineEdit { text <=> root.host; placeholder-text: "Windows 主机或 IP"; }
+        LineEdit { text <=> root.host; placeholder-text: "Windows 主机或 IP[:端口]"; }
         LineEdit { text <=> root.username; placeholder-text: "用户名"; }
         LineEdit { text <=> root.password; placeholder-text: "密码"; input-type: InputType.password; }
 

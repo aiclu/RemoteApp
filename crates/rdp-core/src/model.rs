@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{fmt, net::Ipv6Addr, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -101,6 +101,76 @@ impl ConnectionProfile {
             format!("{}:{}", self.host, self.port)
         }
     }
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum EndpointParseError {
+    #[error("RDP endpoint is missing")]
+    MissingHost,
+    #[error("RDP endpoint has an invalid host")]
+    InvalidHost,
+    #[error("RDP endpoint has an invalid port")]
+    InvalidPort,
+}
+
+pub fn parse_endpoint(input: &str) -> Result<(String, u16), EndpointParseError> {
+    let value = input.trim();
+    if value.is_empty() {
+        return Err(EndpointParseError::MissingHost);
+    }
+
+    if let Some(value) = value.strip_prefix('[') {
+        let closing = value.find(']').ok_or(EndpointParseError::InvalidHost)?;
+        let host = &value[..closing];
+        validate_endpoint_host(host)?;
+        let suffix = &value[closing + 1..];
+        let port = if suffix.is_empty() {
+            DEFAULT_RDP_PORT
+        } else if let Some(raw_port) = suffix.strip_prefix(':') {
+            parse_endpoint_port(raw_port)?
+        } else {
+            return Err(EndpointParseError::InvalidHost);
+        };
+        return Ok((host.to_owned(), port));
+    }
+
+    if value.matches(':').count() == 1 {
+        let (host, raw_port) = value
+            .split_once(':')
+            .expect("a single colon always has two split parts");
+        validate_endpoint_host(host)?;
+        return Ok((host.to_owned(), parse_endpoint_port(raw_port)?));
+    }
+
+    validate_endpoint_host(value)?;
+    Ok((value.to_owned(), DEFAULT_RDP_PORT))
+}
+
+fn parse_endpoint_port(value: &str) -> Result<u16, EndpointParseError> {
+    let port = value
+        .parse::<u16>()
+        .map_err(|_| EndpointParseError::InvalidPort)?;
+    (port != 0)
+        .then_some(port)
+        .ok_or(EndpointParseError::InvalidPort)
+}
+
+fn validate_endpoint_host(host: &str) -> Result<(), EndpointParseError> {
+    if host.is_empty() {
+        return Err(EndpointParseError::MissingHost);
+    }
+    if host.len() > 255
+        || host.chars().any(char::is_whitespace)
+        || host
+            .chars()
+            .any(|character| matches!(character, '/' | '\\'))
+    {
+        return Err(EndpointParseError::InvalidHost);
+    }
+    if host.contains(':') && host.parse::<Ipv6Addr>().is_err() {
+        return Err(EndpointParseError::InvalidHost);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -362,6 +432,42 @@ mod tests {
 
         profile.host = "2001:db8::10".into();
         assert_eq!(profile.endpoint(), "[2001:db8::10]:3389");
+    }
+
+    #[test]
+    fn endpoint_parser_accepts_custom_port() {
+        assert_eq!(
+            parse_endpoint("192.0.2.10:45988"),
+            Ok(("192.0.2.10".into(), 45988))
+        );
+        assert_eq!(
+            parse_endpoint(" server.example:3389 "),
+            Ok(("server.example".into(), 3389))
+        );
+    }
+
+    #[test]
+    fn endpoint_parser_accepts_bracketed_ipv6() {
+        assert_eq!(
+            parse_endpoint("[2001:db8::10]:3390"),
+            Ok(("2001:db8::10".into(), 3390))
+        );
+        assert_eq!(
+            parse_endpoint("2001:db8::10"),
+            Ok(("2001:db8::10".into(), DEFAULT_RDP_PORT))
+        );
+    }
+
+    #[test]
+    fn endpoint_parser_rejects_invalid_port() {
+        assert_eq!(
+            parse_endpoint("192.0.2.10:65536"),
+            Err(EndpointParseError::InvalidPort)
+        );
+        assert_eq!(
+            parse_endpoint("192.0.2.10:0"),
+            Err(EndpointParseError::InvalidPort)
+        );
     }
 
     #[test]

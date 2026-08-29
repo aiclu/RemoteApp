@@ -5,8 +5,9 @@ use std::sync::{
 use std::thread;
 
 use remoteapp_rdp_core::{
-    CertificatePolicy, ConnectionProfile, FrameUpdate, ReconnectPolicy, Secret, SessionCommand,
-    SessionEvent, SessionHandle, SessionStart, SessionState, spawn_session,
+    CertificatePolicy, ConnectionProfile, DisconnectReason, EndpointParseError, FrameUpdate,
+    ReconnectPolicy, Secret, SessionCommand, SessionEvent, SessionHandle, SessionStart,
+    SessionState, parse_endpoint, spawn_session,
 };
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString, Weak};
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
@@ -88,17 +89,25 @@ pub fn run() -> Result<(), slint::PlatformError> {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
-            let host = ui.get_host().trim().to_owned();
+            let endpoint = ui.get_host().trim().to_owned();
             let username = ui.get_username().trim().to_owned();
             let password = ui.get_password().to_string();
-            if host.is_empty() || username.is_empty() || password.is_empty() {
+            if endpoint.is_empty() || username.is_empty() || password.is_empty() {
                 ui.set_status("请填写主机、用户名和密码".into());
                 return;
             }
+            let (host, port) = match parse_endpoint(&endpoint) {
+                Ok(value) => value,
+                Err(error) => {
+                    ui.set_status(endpoint_error_text(error).into());
+                    return;
+                }
+            };
 
             let profile = ConnectionProfile {
-                label: host.clone(),
+                label: endpoint,
                 host,
+                port,
                 username,
                 certificate_policy: CertificatePolicy::TrustOnFirstUse { fingerprint: None },
                 ..Default::default()
@@ -290,7 +299,7 @@ fn monitor_events(
                             );
                         }
                         SessionEvent::Disconnected { reason } => {
-                            set_status(&ui, format!("已断开：{reason:?}"));
+                            set_status(&ui, disconnect_reason_text(reason));
                         }
                         SessionEvent::Error(error) => set_status(&ui, format!("错误：{error}")),
                     }
@@ -339,6 +348,25 @@ fn session_state_text(state: SessionState) -> &'static str {
         SessionState::Reconnecting => "正在重连…",
         SessionState::Disconnecting => "正在断开…",
         SessionState::Disconnected => "已断开",
+    }
+}
+
+fn endpoint_error_text(error: EndpointParseError) -> &'static str {
+    match error {
+        EndpointParseError::MissingHost => "主机地址不能为空",
+        EndpointParseError::InvalidHost => "主机地址格式无效",
+        EndpointParseError::InvalidPort => "端口必须是 1 到 65535",
+    }
+}
+
+fn disconnect_reason_text(reason: DisconnectReason) -> String {
+    match reason {
+        DisconnectReason::UserRequested => "已断开".into(),
+        DisconnectReason::AuthenticationFailed => "认证失败，请检查用户名和密码".into(),
+        DisconnectReason::CertificateRejected => "证书被拒绝".into(),
+        DisconnectReason::TransportLost => "网络连接已断开".into(),
+        DisconnectReason::ProtocolError => "RDP 协议错误".into(),
+        DisconnectReason::Backend(message) => format!("连接失败：{message}"),
     }
 }
 

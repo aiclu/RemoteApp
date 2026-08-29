@@ -9,6 +9,8 @@ through a system VPN. It uses IronRDP for protocol/session handling and Slint fo
 
 - Direct TCP RDP over the device's existing network/VPN.
 - NLA/CredSSP with username and password.
+- The Android connection field accepts `host`, `host:port`, or bracketed IPv6 such as
+  `[2001:db8::10]:3389`; the port defaults to 3389.
 - Strict TLS validation with trust-on-first-use fingerprint support.
 - One active session, touchpad input, hardware keyboard/mouse input, dynamic resize, and
   bounded automatic reconnect.
@@ -65,3 +67,6 @@ builds a signed Release AAB. Configure these repository secrets before pushing a
 - `crates/crypto-store`: versioned profile encryption and in-memory secret handling.
 - `crates/sync-pg`: PostgreSQL schema, migrations, and optimistic conflict handling.
 - `apps/android-client`: Slint UI, Android entry point, touchpad mapper, and renderer boundary.
+
+The Android UI embeds Noto Sans SC for reliable Simplified Chinese glyph coverage; its license is
+kept next to the font at `apps/android-client/ui/NotoSansSC-OFL.txt`.
