@@ -85,9 +85,16 @@ jobs:
           sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           ndk_root="$sdk_root/ndk/$ANDROID_NDK_VERSION"
           linker="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          cxx="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++"
+          ar="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
           test -x "$linker"
+          test -x "$cxx"
+          test -x "$ar"
           echo "ANDROID_NDK_ROOT=$ndk_root" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$linker" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$linker" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$cxx" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$ar" >> "$GITHUB_ENV"
 
       - name: Build Rust native library
         run: cargo build --release --package remoteapp-android --lib --target aarch64-linux-android
