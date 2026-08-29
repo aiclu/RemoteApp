@@ -118,6 +118,7 @@ async fn run_session(
     let mut last_frame_sequence = 0_u64;
     let mut command_closed = false;
     let mut rdp_finished = false;
+    let mut rdp_task_finished = false;
     let mut user_disconnect_requested = false;
     let mut terminal_reason = None;
 
@@ -176,11 +177,11 @@ async fn run_session(
                     }
                 }
             }
-            _ = &mut rdp_task => {
-                terminal_reason.get_or_insert_with(|| {
-                    DisconnectReason::Backend("RDP client stopped".into())
-                });
-                rdp_finished = true;
+            _ = &mut rdp_task, if !rdp_task_finished => {
+                // RdpClient sends its final output event immediately before returning. Keep
+                // receiving from the output channel so that Terminated/ConnectionFailure is
+                // not lost when both branches become ready in the same select iteration.
+                rdp_task_finished = true;
             }
         }
 
