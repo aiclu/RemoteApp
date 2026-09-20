@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-3.0-only"
@@ -37,3 +37,6 @@ panic = "abort"
 
 [patch."https://github.com/Devolutions/IronRDP.git"]
 ironrdp-tls = { path = "vendor/ironrdp-tls" }
+
+[patch.crates-io]
+i-slint-backend-android-activity = { path = "vendor/i-slint-backend-android-activity" }

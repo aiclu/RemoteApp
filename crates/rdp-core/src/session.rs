@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use super::input::{InputOperation, KeyCode, MouseButton};
 use super::model::{ConnectionProfile, FrameUpdate, Secret};
@@ -76,6 +76,7 @@ pub enum SessionCommand {
     },
     SuspendRendering,
     ResumeRendering,
+    ReleaseAll,
     Disconnect,
 }
 
@@ -83,7 +84,7 @@ pub enum SessionCommand {
 pub enum SessionEvent {
     StateChanged(SessionState),
     Connected { width: u32, height: u32 },
-    Frame(Arc<FrameUpdate>),
+
     ClipboardText(String),
     CertificateTrustRequired { fingerprint: String },
     Reconnecting { attempt: u32, maximum_attempts: u32 },
@@ -119,7 +120,8 @@ pub enum DisconnectReason {
 
 pub struct SessionHandle {
     pub commands: mpsc::UnboundedSender<SessionCommand>,
-    pub events: mpsc::Receiver<SessionEvent>,
+    pub events: mpsc::UnboundedReceiver<SessionEvent>,
+    pub frames: watch::Receiver<Option<Arc<FrameUpdate>>>,
 }
 
 pub trait SessionBackend: Send + Sync + 'static {

@@ -1,111 +1,317 @@
 import "./NotoSansSC-Regular.otf";
-import { Button, LineEdit, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, CheckBox, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+
+export struct DeviceRow { id: string, name: string, endpoint: string, username: string, favorite: bool }
 
 export component MainWindow inherits Window {
     title: "RemoteAPP";
-    width: 390px;
-    height: 760px;
-    background: #101318;
+    preferred-width: 420px; preferred-height: 820px; min-width: 320px; min-height: 240px;
     default-font-family: "Noto Sans SC";
-    default-font-size: 16px;
+    default-font-size: 15px;
+    background: root.dark ? #141820 : #f3f5f9;
+    in-out property <bool> dark: false;
+    init => { Palette.color-scheme = ColorScheme.light; }
+    changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
 
-    in-out property <string> host: "";
-    in-out property <string> username: "";
-    in-out property <string> password: "";
-    in-out property <string> clipboard: "";
-    in-out property <string> pending-fingerprint: "";
-    in property <string> status: "未连接";
+    property <color> ink: root.dark ? #f2f5fa : #192438;
+    property <color> muted: root.dark ? #a5b1c3 : #59697f;
+    property <color> surface: root.dark ? #202735 : #ffffff;
+    in-out property <int> page: 0;
+    in-out property <string> search;
+    in-out property <bool> favorites-only: false;
+    in property <[DeviceRow]> devices;
+    in property <bool> storage-ready: false;
+    in property <string> status;
+    in property <bool> error: false;
+    in property <bool> connected: false;
+    in property <string> session-name;
     in property <image> remote-image;
+    in property <float> image-x;
+    in property <float> image-y;
+    in property <float> image-width;
+    in property <float> image-height;
+    in property <float> zoom: 1;
+    in-out property <bool> direct-touch: false;
+    in-out property <bool> pan-mode: false;
+    in-out property <bool> keyboard-visible: false;
+    in-out property <bool> clipboard-visible: false;
+    in-out property <string> clipboard;
+    in-out property <string> ime-text;
+    in property <string> pending-fingerprint;
+    in property <string> certificate-target;
+    in property <bool> certificate-changed: false;
+    in-out property <string> device-name;
+    in-out property <string> host;
+    in-out property <string> port: "3389";
+    in-out property <string> username;
+    in-out property <string> password;
+    in-out property <bool> remember-password: false;
+    in-out property <bool> dynamic-resolution: true;
+    in-out property <string> desktop-width: "1920";
+    in-out property <string> desktop-height: "1080";
+    in-out property <string> desktop-scale: "100";
+    in-out property <string> delete-id;
 
-    callback connect-requested();
-    callback disconnect-requested();
-    callback left-click();
-    callback right-click();
-    callback scroll(int);
-    callback touch-moved(float, float);
-    callback touch-tapped();
+    callback new-device();
+    callback edit-device(string);
+    callback connect-device(string);
+    callback toggle-favorite(string);
+    callback delete-device(string);
+    callback filter-changed();
+    callback save-device(bool);
+    callback disconnect();
+    callback trust-certificate();
+    callback reject-certificate();
+    callback pointer(int, int, float, float, int);
+    callback wheel(float, float);
+    callback viewport(float, float);
+    callback key(string, bool, bool, bool, bool, bool) -> bool;
+    callback ime-key(string, bool, bool, bool, bool, bool) -> bool;
+    callback committed-text(string);
+    callback release-input();
+    callback input-mode-changed();
+    callback reset-view();
+    callback special-key(string);
     callback send-clipboard();
     callback request-clipboard();
-    callback trust-certificate(string);
+    callback read-local-clipboard();
+    callback copy-remote-clipboard();
+    callback leave-editor();
 
-    VerticalBox {
-        padding: 16px;
-        spacing: 10px;
+    public function focus-session() { remote-focus.focus(); }
+    public function focus-keyboard() { ime.focus(); }
 
-        Text {
-            text: "RemoteAPP";
-            color: #e8edf5;
-            font-size: 24px;
+    Rectangle {
+        x: root.safe-area-insets.left;
+        y: root.safe-area-insets.top;
+        width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+        height: max(0px, (root.virtual-keyboard-size.height > 0px ? min(root.height - root.safe-area-insets.bottom, root.virtual-keyboard-position.y) : root.height - root.safe-area-insets.bottom) - root.safe-area-insets.top);
+    if root.page != 2: VerticalLayout {
+        padding: 20px; spacing: 14px;
+        HorizontalLayout {
+            height: 48px;
+            Text { min-width: 0px; text: root.page == 1 ? "电脑连接" : root.page == 3 ? "设置" : "Windows 设备"; color: root.ink; font-size: 26px; font-weight: 700; vertical-alignment: center; }
+            Button { width: 92px; text: root.page == 0 ? "＋ 添加" : "返回"; min-height: 44px; enabled: root.page != 0 || root.storage-ready;
+                clicked => { if root.page == 0 { root.new-device(); } else if root.page == 1 { root.leave-editor(); } else { root.page = 0; } }
+            }
         }
-        Text {
-            text: "Rust 原生 RDP · Android 8+";
-            color: #9ca8b8;
+        if root.status != "": Text { min-width: 0px; text: root.status; color: root.error ? #c03932 : root.muted; wrap: word-wrap; }
+        if root.page == 0: VerticalLayout {
+            spacing: 14px;
+            LineEdit { text <=> root.search; placeholder-text: "搜索名称、主机或账号"; min-height: 44px; edited => { root.filter-changed(); } }
+            if root.devices.length == 0: VerticalLayout {
+                alignment: center; spacing: 12px;
+                Text { min-width: 0px; text: root.search != "" ? "没有匹配的设备" : root.favorites-only ? "还没有收藏的设备" : "你的 Windows，随时连接"; color: root.ink; font-size: 22px; horizontal-alignment: center; wrap: word-wrap; }
+                Text { min-width: 0px; text: "添加一台电脑，通过现有网络或 VPN 连接。"; color: root.muted; horizontal-alignment: center; wrap: word-wrap; }
+            }
+            if root.devices.length > 0: ScrollView { mouse-drag-pan-enabled: true;
+                viewport-width: self.visible-width;
+                VerticalLayout {
+                    spacing: 12px;
+                    for device in root.devices: Rectangle {
+                        background: root.surface; border-radius: 16px; min-height: 158px;
+                        VerticalLayout {
+                            padding: 16px; spacing: 10px;
+                            HorizontalLayout {
+                                Text { text: "▣"; font-size: 30px; color: #2867d8; width: 40px; }
+                                VerticalLayout {
+                                    Text { min-width: 0px; text: device.name; color: root.ink; font-size: 18px; font-weight: 600; overflow: elide; }
+                                    Text { min-width: 0px; text: device.endpoint + " · " + device.username; color: root.muted; overflow: elide; }
+                                }
+                                Button { text: device.favorite ? "★" : "☆"; width: 44px; min-height: 44px; clicked => { root.toggle-favorite(device.id); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { min-width: 0px; text: "连接"; min-height: 44px; clicked => { root.connect-device(device.id); } }
+                                Button { min-width: 0px; text: "编辑"; min-height: 44px; clicked => { root.edit-device(device.id); } }
+                                Button { min-width: 0px; text: "删除"; min-height: 44px; clicked => { root.delete-id = device.id; } }
+                            }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+            HorizontalLayout {
+                height: 52px; spacing: 8px;
+                Button { min-width: 0px; text: "设备"; clicked => { root.favorites-only = false; root.filter-changed(); } }
+                Button { min-width: 0px; text: "收藏"; clicked => { root.favorites-only = true; root.filter-changed(); } }
+                Button { min-width: 0px; text: "设置"; clicked => { root.page = 3; } }
+            }
         }
-
-        LineEdit { text <=> root.host; placeholder-text: "Windows 主机或 IP[:端口]"; }
-        LineEdit { text <=> root.username; placeholder-text: "用户名"; }
-        LineEdit { text <=> root.password; placeholder-text: "密码"; input-type: InputType.password; }
-
-        HorizontalBox {
-            spacing: 8px;
-            Button { text: "连接"; clicked => { root.connect-requested(); } }
-            Button { text: "断开"; clicked => { root.disconnect-requested(); } }
+        if root.page == 1: ScrollView { mouse-drag-pan-enabled: true;
+            viewport-width: self.visible-width;
+            HorizontalLayout {
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    max-width: 640px; horizontal-stretch: 20; spacing: 12px;
+                    Text { min-width: 0px; text: "连接信息"; color: root.ink; font-size: 20px; }
+                    LineEdit { text <=> root.device-name; placeholder-text: "显示名称（可选）"; min-height: 44px; }
+                    LineEdit { text <=> root.host; placeholder-text: "电脑名称或 IP 地址"; min-height: 44px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { min-width: 0px; text: "端口"; color: root.ink; vertical-alignment: center; }
+                        LineEdit { text <=> root.port; input-type: number; min-height: 44px; }
+                    }
+                    LineEdit { text <=> root.username; placeholder-text: "用户名或 域\\用户名"; min-height: 44px; }
+                    LineEdit { text <=> root.password; placeholder-text: "连接密码"; input-type: InputType.password; min-height: 44px; }
+                    CheckBox { text: "在此设备安全保存密码"; checked <=> root.remember-password; }
+                    Text { min-width: 0px; text: "默认每次连接时输入密码。"; color: root.muted; wrap: word-wrap; }
+                    Text { min-width: 0px; text: "显示与输入"; color: root.ink; font-size: 20px; }
+                    CheckBox { text: "自动适配会话区域的分辨率"; checked <=> root.dynamic-resolution; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        LineEdit { text <=> root.desktop-width; placeholder-text: "宽度"; input-type: number; min-height: 44px; }
+                        Text { min-width: 0px; text: "×"; color: root.ink; vertical-alignment: center; }
+                        LineEdit { text <=> root.desktop-height; placeholder-text: "高度"; input-type: number; min-height: 44px; }
+                    }
+                    HorizontalLayout {
+                        Text { min-width: 0px; text: "远端缩放 %"; color: root.ink; vertical-alignment: center; }
+                        LineEdit { text <=> root.desktop-scale; input-type: number; min-height: 44px; }
+                    }
+                    CheckBox { text: "默认使用直接触控"; checked <=> root.direct-touch; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { min-width: 0px; text: "保存"; enabled: root.storage-ready; min-height: 48px; clicked => { root.save-device(false); } }
+                        Button { min-width: 0px; text: "保存并连接"; enabled: root.storage-ready; min-height: 48px; clicked => { root.save-device(true); } }
+                    }
+                    Rectangle { min-height: 16px; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
         }
-
-        Text { text: root.status; color: #7bd88f; }
-        Button {
-            text: "信任证书并重连";
-            visible: root.pending-fingerprint != "";
-            clicked => { root.trust-certificate(root.pending-fingerprint); }
+        if root.page == 3: ScrollView { mouse-drag-pan-enabled: true; viewport-width: self.visible-width; VerticalLayout {
+            spacing: 16px;
+            Text { min-width: 0px; text: "外观"; color: root.ink; font-size: 20px; }
+            CheckBox { text: "深色外观"; checked <=> root.dark; }
+            Text { min-width: 0px; text: "连接与隐私"; color: root.ink; font-size: 20px; }
+            Text { min-width: 0px; text: "设备信息在本机加密保存。记住密码需在每台设备的编辑页中开启。证书变化时会再次请求确认。"; color: root.muted; wrap: word-wrap; }
+            Text { min-width: 0px; text: "使用帮助"; color: root.ink; font-size: 20px; }
+            Text { min-width: 0px; text: "鼠标模式：滑动移动，轻点左键，长按右键，双击按住拖拽。双指上下滑动滚动，捏合缩放。平移模式只移动画面。"; color: root.muted; wrap: word-wrap; }
+            Rectangle { vertical-stretch: 1; }
         }
+        }
+    }
+
+    remote-focus := FocusScope {
+        visible: root.page == 2;
+        enabled: root.page == 2;
+        changed has-focus => { if !self.has-focus { root.release-input(); } }
+        key-pressed(event) => { if root.key(event.text, true, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) { return accept; } return reject; }
+        key-released(event) => { root.key(event.text, false, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta); return accept; }
 
         Rectangle {
-            height: 230px;
-            background: #05070a;
-            border-width: 1px;
-            border-color: #263142;
-            clip: true;
-            Image {
-                source: root.remote-image;
-                width: parent.width;
-                height: parent.height;
+            background: #090c12;
+            VerticalLayout {
+                spacing: 0px;
+                HorizontalLayout {
+                    padding: 6px; spacing: 6px; height: 52px;
+                    Text { min-width: 0px; text: root.session-name; color: #ffffff; overflow: elide; vertical-alignment: center; }
+                    Button { min-width: 0px; text: "键盘"; enabled: root.connected; clicked => { root.keyboard-visible = !root.keyboard-visible; if root.keyboard-visible { root.focus-keyboard(); } else { root.focus-session(); } } }
+                    Button { min-width: 0px; text: root.direct-touch ? "触控" : "鼠标"; clicked => { root.direct-touch = !root.direct-touch; root.input-mode-changed(); root.focus-session(); } }
+                    Button { min-width: 0px; text: "断开"; clicked => { root.disconnect(); } }
+                }
+                Text { min-width: 0px; text: root.status; color: root.error ? #ff938c : #b9c8dd; wrap: word-wrap; }
+                canvas := Rectangle {
+                    background: #090c12; clip: true; vertical-stretch: 1; min-height: 40px;
+                    changed width => { root.viewport(self.width / 1px, self.height / 1px); }
+                    changed height => { root.viewport(self.width / 1px, self.height / 1px); }
+                    Image { source: root.remote-image; x: root.image-x * 1px; y: root.image-y * 1px; width: root.image-width * 1px; height: root.image-height * 1px; image-fit: fill; }
+                    touch := TouchArea {
+                        enabled: root.connected;
+                        pointer-event(e) => {
+                            if e.kind == PointerEventKind.down { root.focus-session(); }
+                            root.pointer(e.touch-finger-id, e.kind == PointerEventKind.down ? 0 : e.kind == PointerEventKind.move ? 1 : e.kind == PointerEventKind.up ? 2 : 3,
+                                self.mouse-x / 1px, self.mouse-y / 1px,
+                                e.button == PointerEventButton.right ? 1 : e.button == PointerEventButton.middle ? 2 : 0);
+                        }
+                        scroll-event(e) => { root.wheel(e.delta-x / 1px, e.delta-y / 1px); return accept; }
+                    }
+                }
+                HorizontalLayout {
+                    height: 48px; spacing: 6px; padding: 4px;
+                    Button { min-width: 0px; text: root.pan-mode ? "平移中" : "平移"; clicked => { root.pan-mode = !root.pan-mode; root.input-mode-changed(); } }
+                    Button { min-width: 0px; text: "适合屏幕"; clicked => { root.reset-view(); } }
+                    Button { min-width: 0px; text: "剪贴板"; enabled: root.connected; clicked => { root.clipboard-visible = !root.clipboard-visible; } }
+                }
+                if root.clipboard-visible: VerticalLayout {
+                    padding: 8px; spacing: 6px;
+                    LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; min-height: 44px; }
+                    HorizontalLayout {
+                        Button { min-width: 0px; text: "读本机"; clicked => { root.read-local-clipboard(); } }
+                        Button { min-width: 0px; text: "发远端"; clicked => { root.send-clipboard(); } }
+                        Button { min-width: 0px; text: "读远端"; clicked => { root.request-clipboard(); } }
+                        Button { min-width: 0px; text: "存本机"; clicked => { root.copy-remote-clipboard(); } }
+                    }
+                }
+                HorizontalLayout {
+                    visible: root.keyboard-visible;
+                    height: root.keyboard-visible ? 46px : 0px;
+                    spacing: 4px;
+                    Button { min-width: 0px; text: "Esc"; clicked => { root.special-key("Escape"); } }
+                    Button { min-width: 0px; text: "Tab"; clicked => { root.special-key("Tab"); } }
+                    Button { min-width: 0px; text: "Ctrl"; clicked => { root.special-key("Control"); } }
+                    Button { min-width: 0px; text: "Alt"; clicked => { root.special-key("Alt"); } }
+                    Button { min-width: 0px; text: "Win"; clicked => { root.special-key("Meta"); } }
+                    Button { min-width: 0px; text: "Enter"; clicked => { root.special-key("Return"); } }
+                }
+                ime := TextInput {
+                    visible: root.keyboard-visible;
+                    height: root.keyboard-visible ? 44px : 0px;
+                    text <=> root.ime-text; color: white;
+                    single-line: true;
+                    changed has-focus => { if !self.has-focus { root.release-input(); } }
+                    edited => { root.committed-text(self.text); }
+                    key-pressed(e) => {
+                        if root.ime-key(e.text, true, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta) { return accept; }
+                        return reject;
+                    }
+                    key-released(e) => {
+                        if root.ime-key(e.text, false, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta) { return accept; }
+                        return reject;
+                    }
+                    accepted => { root.special-key("Return"); }
+                }
             }
         }
+    }
 
-        Text { text: "触控板（按住移动，点击左键）"; color: #c9d2df; }
-        Rectangle {
-            height: 180px;
-            background: #1b2330;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: #344256;
-            ta := TouchArea {
-                moved => { root.touch-moved(self.mouse-x / 1px, self.mouse-y / 1px); }
-                clicked => { root.touch-tapped(); }
+    if root.pending-fingerprint != "": Rectangle {
+        background: #99000000;
+        VerticalLayout {
+            padding: 24px; alignment: center;
+            Rectangle {
+                background: root.surface; border-radius: 16px;
+                VerticalLayout {
+                    padding: 20px; spacing: 16px;
+                    Text { min-width: 0px; text: root.certificate-changed ? "注意：电脑证书已变化" : "确认电脑身份"; color: root.certificate-changed ? #c03932 : root.ink; font-size: 22px; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.certificate-target; color: root.ink; wrap: word-wrap; }
+                    Text { min-width: 0px; text: "请与电脑管理员核对 SHA-256 指纹后继续。"; color: root.muted; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.pending-fingerprint; color: root.ink; wrap: char-wrap; font-size: 13px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { min-width: 0px; text: "取消"; min-height: 48px; clicked => { root.reject-certificate(); } }
+                        Button { min-width: 0px; text: "信任并连接"; min-height: 48px; clicked => { root.trust-certificate(); } }
+                    }
+                }
             }
-            Text {
-                text: "TOUCHPAD";
-                color: #53647a;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                width: parent.width;
-                height: parent.height;
+        }
+    }
+    if root.delete-id != "": Rectangle {
+        background: #99000000;
+        VerticalLayout {
+            padding: 24px; alignment: center;
+            Rectangle {
+                background: root.surface; border-radius: 16px;
+                VerticalLayout {
+                    padding: 20px; spacing: 16px;
+                    Text { min-width: 0px; text: "删除这台设备及其保存的密码？"; color: root.ink; wrap: word-wrap; }
+                    HorizontalLayout {
+                        Button { min-width: 0px; text: "取消"; clicked => { root.delete-id = ""; } }
+                        Button { min-width: 0px; text: "删除"; clicked => { root.delete-device(root.delete-id); root.delete-id = ""; } }
+                    }
+                }
             }
         }
-
-        HorizontalBox {
-            spacing: 8px;
-            Button { text: "左键"; clicked => { root.left-click(); } }
-            Button { text: "右键"; clicked => { root.right-click(); } }
-            Button { text: "滚轮 ↑"; clicked => { root.scroll(120); } }
-            Button { text: "滚轮 ↓"; clicked => { root.scroll(-120); } }
-        }
-
-        HorizontalBox {
-            spacing: 8px;
-            LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; }
-            Button { text: "发送"; clicked => { root.send-clipboard(); } }
-            Button { text: "请求"; clicked => { root.request-clipboard(); } }
-        }
+    }
     }
 }

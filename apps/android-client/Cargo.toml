@@ -15,8 +15,19 @@ path = "src/main.rs"
 
 [dependencies]
 remoteapp-rdp-core = { path = "../../crates/rdp-core" }
-slint = { workspace = true, features = ["backend-android-activity-06"] }
+slint = { workspace = true, features = ["backend-android-activity-06", "renderer-software"] }
 tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+remoteapp-crypto-store = { path = "../../crates/crypto-store" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
 
 [build-dependencies]
 slint-build.workspace = true
@@ -25,3 +36,6 @@ slint-build.workspace = true
 package_name = "com.remoteapp.client"
 label = "RemoteAPP"
 min_sdk_version = 26
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

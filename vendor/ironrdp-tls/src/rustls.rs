@@ -76,8 +76,8 @@ where
 
 /// Upgrades a stream with normal platform-root and server-name validation.
 ///
-/// If validation fails, `callback` is invoked synchronously on the handshake thread
-/// with the leaf certificate and validation error. A callback approval accepts that
+/// The callback runs synchronously on the handshake thread for every certificate.
+/// Its error string is empty after successful CA validation. Approval accepts that
 /// certificate for this handshake only.
 pub async fn upgrade_with_certificate_validation_callback<S>(
     stream: S,
@@ -92,7 +92,7 @@ where
 
 /// Upgrades a stream with normal platform-root and server-name validation.
 ///
-/// On validation failure, invokes `callback` with `endpoint` so callers can scope
+/// Invokes `callback` with `endpoint` (including CA-valid certificates) so callers can scope
 /// certificate exceptions to the configured connection endpoint.
 pub async fn upgrade_with_certificate_validation_callback_for_endpoint<S>(
     stream: S,
@@ -200,7 +200,14 @@ impl ServerCertVerifier for CallbackVerifier {
             .verifier
             .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
         {
-            Ok(verified) => Ok(verified),
+            Ok(verified) => {
+                // A saved endpoint fingerprint must also be enforced for CA-valid replacements.
+                if (self.callback)(end_entity.as_ref(), &self.endpoint, "") {
+                    Ok(verified)
+                } else {
+                    Err(rustls::Error::General("endpoint certificate policy rejected the certificate".into()))
+                }
+            },
             Err(error) if (self.callback)(end_entity.as_ref(), &self.endpoint, &error.to_string()) => {
                 Ok(ServerCertVerified::assertion())
             }

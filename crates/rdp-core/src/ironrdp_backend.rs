@@ -4,7 +4,7 @@ use std::{
 };
 
 use sha2::{Digest, Sha256};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, warn};
 
 use ironrdp_client::config::{ClipboardType, ConfigBuilder, Destination, TransportKind};
@@ -46,10 +46,12 @@ impl SessionBackend for IronRdpBackend {
             .map_err(|error| SessionError::InvalidProfile(error.to_string()))?;
 
         let (command_sender, command_receiver) = mpsc::unbounded_channel();
-        let (event_sender, event_receiver) = mpsc::channel(OUTPUT_QUEUE_CAPACITY);
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let (frames_sender, frames_receiver) = watch::channel(None);
         let handle = SessionHandle {
             commands: command_sender,
             events: event_receiver,
+            frames: frames_receiver,
         };
 
         thread::Builder::new()
@@ -61,13 +63,18 @@ impl SessionBackend for IronRdpBackend {
                 {
                     Ok(runtime) => runtime,
                     Err(error) => {
-                        let _ = event_sender.blocking_send(SessionEvent::Error(
-                            SessionError::Backend(format!("failed to create RDP runtime: {error}")),
-                        ));
+                        let _ = event_sender.send(SessionEvent::Error(SessionError::Backend(
+                            format!("failed to create RDP runtime: {error}"),
+                        )));
                         return;
                     }
                 };
-                runtime.block_on(run_session(start, command_receiver, event_sender));
+                runtime.block_on(run_session(
+                    start,
+                    command_receiver,
+                    event_sender,
+                    frames_sender,
+                ));
             })
             .map_err(|error| {
                 SessionError::Backend(format!("failed to spawn RDP thread: {error}"))
@@ -80,11 +87,10 @@ impl SessionBackend for IronRdpBackend {
 async fn run_session(
     start: SessionStart,
     mut commands: mpsc::UnboundedReceiver<SessionCommand>,
-    events: mpsc::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
+    frames: watch::Sender<Option<Arc<FrameUpdate>>>,
 ) {
-    let _ = events
-        .send(SessionEvent::StateChanged(SessionState::Connecting))
-        .await;
+    let _ = events.send(SessionEvent::StateChanged(SessionState::Connecting));
     let clipboard_text = Arc::new(Mutex::new(String::new()));
     let (clipboard_messages, mut clipboard_receiver) =
         mpsc::unbounded_channel::<ClipboardMessage>();
@@ -98,12 +104,10 @@ async fn run_session(
     ) {
         Ok(config) => config,
         Err(error) => {
-            let _ = events.send(SessionEvent::Error(error.clone())).await;
-            let _ = events
-                .send(SessionEvent::Disconnected {
-                    reason: DisconnectReason::Backend(error.to_string()),
-                })
-                .await;
+            let _ = events.send(SessionEvent::Error(error.clone()));
+            let _ = events.send(SessionEvent::Disconnected {
+                reason: DisconnectReason::Backend(error.to_string()),
+            });
             return;
         }
     };
@@ -115,6 +119,7 @@ async fn run_session(
     let mut rdp_task = Box::pin(client.run());
     let mut input_database = InputDatabase::new();
     let mut rendering_suspended = false;
+    let mut suspended_frame = None;
     let mut last_frame_sequence = 0_u64;
     let mut command_closed = false;
     let mut rdp_finished = false;
@@ -127,6 +132,11 @@ async fn run_session(
             maybe_command = commands.recv(), if !command_closed => {
                 match maybe_command {
                     Some(command) => {
+                        if matches!(&command, SessionCommand::ResumeRendering) {
+                            if let Some(output) = suspended_frame.take() {
+                                let _ = map_output(output, &events, &mut last_frame_sequence, &frames).await;
+                            }
+                        }
                         if matches!(&command, SessionCommand::Disconnect) {
                             user_disconnect_requested = true;
                         }
@@ -137,7 +147,7 @@ async fn run_session(
                             &clipboard_text,
                             &mut rendering_suspended,
                         ).await {
-                            let _ = events.send(SessionEvent::Error(error)).await;
+                            let _ = events.send(SessionEvent::Error(error));
                         }
                     }
                     None => {
@@ -149,11 +159,15 @@ async fn run_session(
             maybe_output = output_receiver.recv() => {
                 match maybe_output {
                     Some(output) => {
+                        if rendering_suspended && matches!(&output, RdpOutputEvent::Image { .. }) {
+                            suspended_frame = Some(output);
+                            continue;
+                        }
                         if let Some(reason) = map_output(
                             output,
                             &events,
                             &mut last_frame_sequence,
-                            rendering_suspended,
+                            &frames,
                         ).await {
                             terminal_reason = Some(reason);
                             rdp_finished = true;
@@ -197,13 +211,13 @@ async fn run_session(
     } else {
         terminal_reason.unwrap_or_else(|| DisconnectReason::Backend("RDP session ended".into()))
     };
-    let _ = events.send(SessionEvent::Disconnected { reason }).await;
+    let _ = events.send(SessionEvent::Disconnected { reason });
 }
 
 fn build_config(
     profile: &ConnectionProfile,
     password: &Secret,
-    events: mpsc::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     clipboard_text: Arc<Mutex<String>>,
     clipboard_messages: mpsc::UnboundedSender<ClipboardMessage>,
 ) -> Result<(ironrdp_client::config::Config, TextClipboardFactory), SessionError> {
@@ -240,15 +254,12 @@ fn build_config(
         let events = events.clone();
         builder = builder.with_certificate_validation_callback(Arc::new(move |certificate, endpoint, error| {
             let actual = hex_sha256(certificate);
-            match expected.as_deref() {
-                Some(expected) if expected == actual => true,
-                _ => {
-                    debug!(endpoint, error, fingerprint = %actual, "RDP certificate requires trust confirmation");
-                    let _ = events.try_send(SessionEvent::CertificateTrustRequired {
-                        fingerprint: actual,
-                    });
-                    false
-                }
+            if certificate_is_approved(expected.as_deref(), &actual, error) {
+                true
+            } else {
+                debug!(endpoint, error, fingerprint = %actual, "RDP certificate requires trust confirmation");
+                let _ = events.send(SessionEvent::CertificateTrustRequired { fingerprint: actual });
+                false
             }
         }));
     }
@@ -262,6 +273,13 @@ fn build_config(
         .build()
         .map_err(|error| SessionError::Backend(error.to_string()))?;
     Ok((config, factory))
+}
+
+fn certificate_is_approved(expected: Option<&str>, actual: &str, validation_error: &str) -> bool {
+    match expected {
+        Some(expected) => expected == actual,
+        None => validation_error.is_empty(),
+    }
 }
 
 fn hex_sha256(data: &[u8]) -> String {
@@ -338,6 +356,14 @@ async fn dispatch_command(
             *rendering_suspended = false;
             Ok(())
         }
+        SessionCommand::ReleaseAll => {
+            let permit = sender.try_reserve().map_err(|_| {
+                sender.request_close();
+                SessionError::ChannelClosed
+            })?;
+            permit.send(RdpInputEvent::FastPath(database.release_all()));
+            Ok(())
+        }
         SessionCommand::Disconnect => {
             sender.request_close();
             Ok(())
@@ -371,13 +397,16 @@ async fn dispatch_operation(
         | InputOperation::Resize(_)
         | InputOperation::Disconnect => return Ok(()),
     };
+    let permit = sender.try_reserve().map_err(|_| {
+        sender.request_close();
+        SessionError::ChannelClosed
+    })?;
     let events = database.apply(operations);
     if events.is_empty() {
         return Ok(());
     }
-    sender
-        .try_send(RdpInputEvent::FastPath(events))
-        .map_err(map_input_send_error)
+    permit.send(RdpInputEvent::FastPath(events));
+    Ok(())
 }
 
 fn map_input_send_error(
@@ -420,15 +449,13 @@ fn to_iron_key_operation(key: KeyCode, pressed: bool) -> Operation {
 
 async fn map_output(
     output: RdpOutputEvent,
-    events: &mpsc::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     last_sequence: &mut u64,
-    rendering_suspended: bool,
+    frames: &watch::Sender<Option<Arc<FrameUpdate>>>,
 ) -> Option<DisconnectReason> {
     match output {
         RdpOutputEvent::Connected => {
-            let _ = events
-                .send(SessionEvent::StateChanged(SessionState::Connected))
-                .await;
+            let _ = events.send(SessionEvent::StateChanged(SessionState::Connected));
             None
         }
         RdpOutputEvent::Image {
@@ -438,9 +465,7 @@ async fn map_output(
         } => {
             let width = u32::from(width.get());
             let height = u32::from(height.get());
-            if rendering_suspended {
-                return None;
-            }
+
             let mut rgba = Vec::with_capacity(buffer.len() * 4);
             for pixel in buffer {
                 let [_, red, green, blue] = pixel.to_be_bytes();
@@ -456,14 +481,12 @@ async fn map_output(
                 vec![Rect::full(width, height)],
             ) {
                 Ok(frame) => {
-                    let _ = events.send(SessionEvent::Frame(Arc::new(frame))).await;
+                    frames.send_replace(Some(Arc::new(frame)));
                 }
                 Err(error) => {
-                    let _ = events
-                        .send(SessionEvent::Error(SessionError::Backend(
-                            error.to_string(),
-                        )))
-                        .await;
+                    let _ = events.send(SessionEvent::Error(SessionError::Backend(
+                        error.to_string(),
+                    )));
                 }
             }
             None
@@ -474,32 +497,26 @@ async fn map_output(
             response,
             ..
         } => {
-            let _ = events
-                .send(SessionEvent::Reconnecting {
-                    attempt,
-                    maximum_attempts,
-                })
-                .await;
+            let _ = events.send(SessionEvent::Reconnecting {
+                attempt,
+                maximum_attempts,
+            });
             let _ = response.send(AutoReconnectDecision::Continue);
             None
         }
         RdpOutputEvent::AutoReconnected => {
-            let _ = events
-                .send(SessionEvent::StateChanged(SessionState::Connected))
-                .await;
+            let _ = events.send(SessionEvent::StateChanged(SessionState::Connected));
             None
         }
         RdpOutputEvent::ConnectionFailure(error) => {
             warn!(error = %error, "RDP connection failed");
             let message = error.report().to_string();
-            let _ = events
-                .send(SessionEvent::Error(SessionError::Backend(message.clone())))
-                .await;
+            let _ = events.send(SessionEvent::Error(SessionError::Backend(message.clone())));
             Some(DisconnectReason::Backend(message))
         }
         RdpOutputEvent::MonitorLayout(monitors) => {
             if let Some((width, height)) = monitor_bounds(&monitors) {
-                let _ = events.send(SessionEvent::Connected { width, height }).await;
+                let _ = events.send(SessionEvent::Connected { width, height });
             }
             None
         }
@@ -553,7 +570,7 @@ fn monitor_bounds(monitors: &[Monitor]) -> Option<(u32, u32)> {
 #[derive(Debug, Clone)]
 struct TextClipboardFactory {
     text: Arc<Mutex<String>>,
-    events: mpsc::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     messages: mpsc::UnboundedSender<ClipboardMessage>,
 }
 
@@ -570,7 +587,7 @@ impl CliprdrBackendFactory for TextClipboardFactory {
 #[derive(Debug)]
 struct TextClipboardBackend {
     text: Arc<Mutex<String>>,
-    events: mpsc::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     messages: mpsc::UnboundedSender<ClipboardMessage>,
 }
 
@@ -628,14 +645,12 @@ impl CliprdrBackend for TextClipboardBackend {
             .or_else(|_| response.to_string())
         {
             Ok(value) => {
-                let _ = self.events.try_send(SessionEvent::ClipboardText(value));
+                let _ = self.events.send(SessionEvent::ClipboardText(value));
             }
             Err(error) => {
-                let _ = self
-                    .events
-                    .try_send(SessionEvent::Error(SessionError::Backend(
-                        error.to_string(),
-                    )));
+                let _ = self.events.send(SessionEvent::Error(SessionError::Backend(
+                    error.to_string(),
+                )));
             }
         }
     }
@@ -651,4 +666,20 @@ impl CliprdrBackend for TextClipboardBackend {
     fn on_lock(&mut self, _data_id: ironrdp_cliprdr::pdu::LockDataId) {}
 
     fn on_unlock(&mut self, _data_id: ironrdp_cliprdr::pdu::LockDataId) {}
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    #[test]
+    fn changed_pinned_certificate_requires_confirmation_even_when_ca_valid() {
+        assert!(!certificate_is_approved(Some("old"), "new", ""));
+        assert!(certificate_is_approved(
+            Some("known"),
+            "known",
+            "self-signed"
+        ));
+        assert!(!certificate_is_approved(None, "first", "untrusted"));
+        assert!(certificate_is_approved(None, "valid", ""));
+    }
 }
