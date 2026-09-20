@@ -98,25 +98,79 @@ fn dpapi(bytes: &[u8], protect: bool) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(target_os = "android")]
-fn android_call<T>(
-    call: impl FnOnce(&mut jni::JNIEnv<'_>, &jni::objects::JObject<'_>) -> Result<T, String>,
-) -> Result<T, String> {
+thread_local! {
+    // ndk-context contains Application, which does not implement our Activity methods.
+    static ANDROID_ACTIVITY: std::cell::RefCell<Option<jni::objects::GlobalRef>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(target_os = "android")]
+pub struct AndroidActivityScope;
+#[cfg(target_os = "android")]
+impl Drop for AndroidActivityScope {
+    fn drop(&mut self) {
+        ANDROID_ACTIVITY.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+#[cfg(target_os = "android")]
+/// The pointer must refer to the live Activity supplied by AndroidApp.
+pub unsafe fn bind_android_activity(
+    activity: *mut std::ffi::c_void,
+) -> Result<AndroidActivityScope, String> {
     let context = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(context.vm().cast()) }.map_err(|e| e.to_string())?;
-    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-    let activity = unsafe { jni::objects::JObject::from_raw(context.context().cast()) };
-    let result = call(&mut env, &activity);
-    // The activity reference belongs to android-activity, not to us.
-    let _ = activity.into_raw();
-    if env.exception_check().unwrap_or(false) {
-        let _ = env.exception_clear();
-        return Err("Android 安全存储或剪贴板调用失败".into());
-    }
-    result
+    let env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    let borrowed = unsafe { jni::objects::JObject::from_raw(activity.cast()) };
+    let owned = env.new_global_ref(&borrowed).map_err(|e| e.to_string());
+    let _ = borrowed.into_raw();
+    ANDROID_ACTIVITY.with(|slot| {
+        *slot.borrow_mut() = Some(owned?);
+        Ok(AndroidActivityScope)
+    })
+}
+#[cfg(target_os = "android")]
+fn android_call<T>(
+    operation: &str,
+    call: impl FnOnce(&mut jni::JNIEnv<'_>, &jni::objects::JObject<'_>) -> Result<T, String>,
+) -> Result<T, String> {
+    ANDROID_ACTIVITY.with(|slot| {
+        let activity_owner = slot.borrow();
+        let activity = activity_owner
+            .as_ref()
+            .ok_or("Android Activity 尚未初始化")?;
+        let context = ndk_context::android_context();
+        let vm =
+            unsafe { jni::JavaVM::from_raw(context.vm().cast()) }.map_err(|e| e.to_string())?;
+        let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+        let activity = activity.as_obj();
+        let result = env.with_local_frame(32, |env| {
+            let result = call(env, activity);
+            if env.exception_check()? {
+                let exception = env.exception_occurred()?;
+                env.exception_clear()?;
+                // Report the exception type, not its potentially sensitive message.
+                let class = env
+                    .call_method(&exception, "getClass", "()Ljava/lang/Class;", &[])?
+                    .l()?;
+                let name = env
+                    .call_method(class, "getName", "()Ljava/lang/String;", &[])?
+                    .l()?;
+                let name = jni::objects::JString::from(name);
+                let name: String = env.get_string(&name)?.into();
+                return Ok::<_, jni::errors::Error>(Err(format!("{operation}失败（{name}）")));
+            }
+            Ok(result.map_err(|e| format!("{operation}失败：{e}")))
+        });
+        // Also clear an exception raised while obtaining diagnostic information.
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        result.map_err(|e| format!("{operation}失败：{e}"))?
+    })
 }
 #[cfg(target_os = "android")]
 fn android_crypto(bytes: &[u8], method: &str) -> Result<Vec<u8>, String> {
-    android_call(|env, activity| {
+    android_call(method, |env, activity| {
         let input = env
             .byte_array_from_slice(bytes)
             .map_err(|e| e.to_string())?;
@@ -144,7 +198,7 @@ impl PlatformServices for NativePlatform {
         }
         #[cfg(target_os = "android")]
         {
-            return android_call(|env, activity| {
+            return android_call("读取应用私有目录", |env, activity| {
                 let file = env
                     .call_method(activity, "getFilesDir", "()Ljava/io/File;", &[])
                     .and_then(|v| v.l())
@@ -196,7 +250,7 @@ impl PlatformServices for NativePlatform {
     fn read_clipboard(&self) -> Result<String, String> {
         #[cfg(target_os = "android")]
         {
-            return android_call(|env, activity| {
+            return android_call("读取系统剪贴板", |env, activity| {
                 let value = env
                     .call_method(activity, "readClipboard", "()Ljava/lang/String;", &[])
                     .and_then(|v| v.l())
@@ -214,7 +268,7 @@ impl PlatformServices for NativePlatform {
     fn write_clipboard(&self, text: &str) -> Result<(), String> {
         #[cfg(target_os = "android")]
         {
-            return android_call(|env, activity| {
+            return android_call("写入系统剪贴板", |env, activity| {
                 let text = env.new_string(text).map_err(|e| e.to_string())?;
                 env.call_method(
                     activity,

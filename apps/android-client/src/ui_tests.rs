@@ -31,11 +31,14 @@ fn render_mobile_and_tablet_layouts() {
             favorite: false,
         },
     ])));
+    let saved_devices = ui.get_devices();
     ui.show().unwrap();
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-review");
     std::fs::create_dir_all(&out).unwrap();
     for (name, width, height, page) in [
         ("phone-home", 390, 844, 0),
+        ("phone-empty", 390, 844, 0),
+        ("phone-empty-storage-error", 390, 844, 0),
         ("phone-edit", 390, 844, 1),
         ("landscape-edit", 844, 390, 1),
         ("tablet-home", 1024, 768, 0),
@@ -43,10 +46,19 @@ fn render_mobile_and_tablet_layouts() {
         ("tablet-session", 1024, 768, 2),
         ("phone-settings", 390, 844, 3),
     ] {
+        ui.set_devices(if name.contains("empty") {
+            ModelRc::default()
+        } else {
+            saved_devices.clone()
+        });
+        ui.set_error(name.contains("storage-error"));
+        ui.set_storage_ready(!name.contains("storage-error"));
         ui.set_page(page);
         ui.set_session_name("办公室电脑".into());
         ui.set_connected(true);
-        ui.set_status(if page == 2 {
+        ui.set_status(if name.contains("storage-error") {
+            "安全存储不可用：测试错误信息".into()
+        } else if page == 2 {
             "已连接".into()
         } else {
             "".into()

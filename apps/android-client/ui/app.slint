@@ -91,20 +91,20 @@ export component MainWindow inherits Window {
         HorizontalLayout {
             height: 48px;
             Text { min-width: 0px; text: root.page == 1 ? "电脑连接" : root.page == 3 ? "设置" : "Windows 设备"; color: root.ink; font-size: 26px; font-weight: 700; vertical-alignment: center; }
-            Button { width: 92px; text: root.page == 0 ? "＋ 添加" : "返回"; min-height: 44px; enabled: root.page != 0 || root.storage-ready;
+            Button { width: 92px; text: root.page == 0 ? "＋ 添加" : "返回"; height: 44px; enabled: root.page != 0 || root.storage-ready;
                 clicked => { if root.page == 0 { root.new-device(); } else if root.page == 1 { root.leave-editor(); } else { root.page = 0; } }
             }
         }
-        if root.status != "": Text { min-width: 0px; text: root.status; color: root.error ? #c03932 : root.muted; wrap: word-wrap; }
-        if root.page == 0: VerticalLayout {
+        if root.status != "": Text { vertical-stretch: 0; min-width: 0px; text: root.status; color: root.error ? #c03932 : root.muted; wrap: word-wrap; }
+        if root.page == 0: VerticalLayout { vertical-stretch: 1;
             spacing: 14px;
-            LineEdit { text <=> root.search; placeholder-text: "搜索名称、主机或账号"; min-height: 44px; edited => { root.filter-changed(); } }
-            if root.devices.length == 0: VerticalLayout {
+            search-field := LineEdit { text <=> root.search; placeholder-text: "搜索名称、主机或账号"; height: 48px; vertical-stretch: 0; edited => { root.filter-changed(); } }
+            if root.devices.length == 0: VerticalLayout { vertical-stretch: 1;
                 alignment: center; spacing: 12px;
                 Text { min-width: 0px; text: root.search != "" ? "没有匹配的设备" : root.favorites-only ? "还没有收藏的设备" : "你的 Windows，随时连接"; color: root.ink; font-size: 22px; horizontal-alignment: center; wrap: word-wrap; }
                 Text { min-width: 0px; text: "添加一台电脑，通过现有网络或 VPN 连接。"; color: root.muted; horizontal-alignment: center; wrap: word-wrap; }
             }
-            if root.devices.length > 0: ScrollView { mouse-drag-pan-enabled: true;
+            if root.devices.length > 0: ScrollView { vertical-stretch: 1; mouse-drag-pan-enabled: true;
                 viewport-width: self.visible-width;
                 VerticalLayout {
                     spacing: 12px;
@@ -118,13 +118,13 @@ export component MainWindow inherits Window {
                                     Text { min-width: 0px; text: device.name; color: root.ink; font-size: 18px; font-weight: 600; overflow: elide; }
                                     Text { min-width: 0px; text: device.endpoint + " · " + device.username; color: root.muted; overflow: elide; }
                                 }
-                                Button { text: device.favorite ? "★" : "☆"; width: 44px; min-height: 44px; clicked => { root.toggle-favorite(device.id); } }
+                                Button { text: device.favorite ? "★" : "☆"; width: 44px; height: 44px; clicked => { root.toggle-favorite(device.id); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                Button { min-width: 0px; text: "连接"; min-height: 44px; clicked => { root.connect-device(device.id); } }
-                                Button { min-width: 0px; text: "编辑"; min-height: 44px; clicked => { root.edit-device(device.id); } }
-                                Button { min-width: 0px; text: "删除"; min-height: 44px; clicked => { root.delete-id = device.id; } }
+                                Button { min-width: 0px; text: "连接"; height: 44px; clicked => { root.connect-device(device.id); } }
+                                Button { min-width: 0px; text: "编辑"; height: 44px; clicked => { root.edit-device(device.id); } }
+                                Button { min-width: 0px; text: "删除"; height: 44px; clicked => { root.delete-id = device.id; } }
                             }
                         }
                     }
@@ -145,34 +145,34 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     max-width: 640px; horizontal-stretch: 20; spacing: 12px;
                     Text { min-width: 0px; text: "连接信息"; color: root.ink; font-size: 20px; }
-                    LineEdit { text <=> root.device-name; placeholder-text: "显示名称（可选）"; min-height: 44px; }
-                    LineEdit { text <=> root.host; placeholder-text: "电脑名称或 IP 地址"; min-height: 44px; }
+                    LineEdit { text <=> root.device-name; placeholder-text: "显示名称（可选）"; height: 44px; }
+                    LineEdit { text <=> root.host; placeholder-text: "电脑名称或 IP 地址"; height: 44px; }
                     HorizontalLayout {
                         spacing: 8px;
                         Text { min-width: 0px; text: "端口"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.port; input-type: number; min-height: 44px; }
+                        LineEdit { text <=> root.port; input-type: number; height: 44px; }
                     }
-                    LineEdit { text <=> root.username; placeholder-text: "用户名或 域\\用户名"; min-height: 44px; }
-                    LineEdit { text <=> root.password; placeholder-text: "连接密码"; input-type: InputType.password; min-height: 44px; }
+                    LineEdit { text <=> root.username; placeholder-text: "用户名或 域\\用户名"; height: 44px; }
+                    LineEdit { text <=> root.password; placeholder-text: "连接密码"; input-type: InputType.password; height: 44px; }
                     CheckBox { text: "在此设备安全保存密码"; checked <=> root.remember-password; }
                     Text { min-width: 0px; text: "默认每次连接时输入密码。"; color: root.muted; wrap: word-wrap; }
                     Text { min-width: 0px; text: "显示与输入"; color: root.ink; font-size: 20px; }
                     CheckBox { text: "自动适配会话区域的分辨率"; checked <=> root.dynamic-resolution; }
                     HorizontalLayout {
                         spacing: 8px;
-                        LineEdit { text <=> root.desktop-width; placeholder-text: "宽度"; input-type: number; min-height: 44px; }
+                        LineEdit { text <=> root.desktop-width; placeholder-text: "宽度"; input-type: number; height: 44px; }
                         Text { min-width: 0px; text: "×"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.desktop-height; placeholder-text: "高度"; input-type: number; min-height: 44px; }
+                        LineEdit { text <=> root.desktop-height; placeholder-text: "高度"; input-type: number; height: 44px; }
                     }
                     HorizontalLayout {
                         Text { min-width: 0px; text: "远端缩放 %"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.desktop-scale; input-type: number; min-height: 44px; }
+                        LineEdit { text <=> root.desktop-scale; input-type: number; height: 44px; }
                     }
                     CheckBox { text: "默认使用直接触控"; checked <=> root.direct-touch; }
                     HorizontalLayout {
                         spacing: 8px;
-                        Button { min-width: 0px; text: "保存"; enabled: root.storage-ready; min-height: 48px; clicked => { root.save-device(false); } }
-                        Button { min-width: 0px; text: "保存并连接"; enabled: root.storage-ready; min-height: 48px; clicked => { root.save-device(true); } }
+                        Button { min-width: 0px; text: "保存"; enabled: root.storage-ready; height: 48px; clicked => { root.save-device(false); } }
+                        Button { min-width: 0px; text: "保存并连接"; enabled: root.storage-ready; height: 48px; clicked => { root.save-device(true); } }
                     }
                     Rectangle { min-height: 16px; }
                 }
@@ -235,7 +235,7 @@ export component MainWindow inherits Window {
                 }
                 if root.clipboard-visible: VerticalLayout {
                     padding: 8px; spacing: 6px;
-                    LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; min-height: 44px; }
+                    LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; height: 44px; }
                     HorizontalLayout {
                         Button { min-width: 0px; text: "读本机"; clicked => { root.read-local-clipboard(); } }
                         Button { min-width: 0px; text: "发远端"; clicked => { root.send-clipboard(); } }
@@ -289,8 +289,8 @@ export component MainWindow inherits Window {
                     Text { min-width: 0px; text: root.pending-fingerprint; color: root.ink; wrap: char-wrap; font-size: 13px; }
                     HorizontalLayout {
                         spacing: 8px;
-                        Button { min-width: 0px; text: "取消"; min-height: 48px; clicked => { root.reject-certificate(); } }
-                        Button { min-width: 0px; text: "信任并连接"; min-height: 48px; clicked => { root.trust-certificate(); } }
+                        Button { min-width: 0px; text: "取消"; height: 48px; clicked => { root.reject-certificate(); } }
+                        Button { min-width: 0px; text: "信任并连接"; height: 48px; clicked => { root.trust-certificate(); } }
                     }
                 }
             }

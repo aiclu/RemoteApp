@@ -889,6 +889,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
 #[unsafe(no_mangle)]
 pub fn android_main(app: slint::android::AndroidApp) {
     use slint::android::android_activity::{MainEvent, PollEvent};
+    let _activity_scope = unsafe { platform::bind_android_activity(app.activity_as_ptr()) }
+        .expect("Android Activity binding failed");
     let controller = Controller::default();
     let lifecycle = controller.clone();
     slint::android::init_with_event_listener(app, move |event| match event {
