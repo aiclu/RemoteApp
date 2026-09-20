@@ -15,6 +15,31 @@ import javax.crypto.spec.GCMParameterSpec;
 
 /** Native UI with a small platform-only bridge. Keys never leave Android Keystore. */
 public final class RemoteActivity extends NativeActivity {
+    @Override public void onCreate(android.os.Bundle state) {
+        super.onCreate(state);
+        setSystemTheme(false);
+    }
+    public void setSystemTheme(boolean dark) {
+        runOnUiThread(() -> {
+            android.view.Window window = getWindow();
+            int color = dark ? android.graphics.Color.rgb(17, 21, 28) : android.graphics.Color.rgb(245, 246, 248);
+            window.setStatusBarColor(color);
+            window.setNavigationBarColor(color);
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController controller = window.getInsetsController();
+                if (controller != null) {
+                    int flags = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    controller.setSystemBarsAppearance(dark ? 0 : flags, flags);
+                }
+            } else {
+                android.view.View decor = window.getDecorView();
+                int flags = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                decor.setSystemUiVisibility((decor.getSystemUiVisibility() & ~flags) | (dark ? 0 : flags));
+            }
+        });
+    }
     private static final String ALIAS = "remoteapp.local.v1";
     private SecretKey key(boolean create) throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore");

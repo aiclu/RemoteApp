@@ -1,5 +1,6 @@
 import "./NotoSansSC-Regular.otf";
-import { Button, LineEdit, CheckBox, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Button, LineEdit, Field, CheckBox, DeviceCard, Navigation } from "components.slint";
 
 export struct DeviceRow { id: string, name: string, endpoint: string, username: string, favorite: bool }
 
@@ -8,14 +9,15 @@ export component MainWindow inherits Window {
     preferred-width: 420px; preferred-height: 820px; min-width: 320px; min-height: 240px;
     default-font-family: "Noto Sans SC";
     default-font-size: 15px;
-    background: root.dark ? #141820 : #f3f5f9;
+    background: Theme.background;
     in-out property <bool> dark: false;
-    init => { Palette.color-scheme = ColorScheme.light; }
-    changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    init => { Theme.dark = root.dark; }
+    changed dark => { Theme.dark = root.dark; root.system-theme(root.dark || root.page == 2); }
+    changed page => { root.system-theme(root.dark || root.page == 2); root.menu-id = ""; root.password-visible = false; }
 
-    property <color> ink: root.dark ? #f2f5fa : #192438;
-    property <color> muted: root.dark ? #a5b1c3 : #59697f;
-    property <color> surface: root.dark ? #202735 : #ffffff;
+    property <color> ink: Theme.ink;
+    property <color> muted: Theme.muted;
+    property <color> surface: Theme.surface;
     in-out property <int> page: 0;
     in-out property <string> search;
     in-out property <bool> favorites-only: false;
@@ -35,6 +37,7 @@ export component MainWindow inherits Window {
     in-out property <bool> pan-mode: false;
     in-out property <bool> keyboard-visible: false;
     in-out property <bool> clipboard-visible: false;
+    in-out property <bool> session-menu-visible: false;
     in-out property <string> clipboard;
     in-out property <string> ime-text;
     in property <string> pending-fingerprint;
@@ -46,11 +49,23 @@ export component MainWindow inherits Window {
     in-out property <string> username;
     in-out property <string> password;
     in-out property <bool> remember-password: false;
-    in-out property <bool> dynamic-resolution: true;
+    in-out property <bool> dynamic-resolution: false;
     in-out property <string> desktop-width: "1920";
     in-out property <string> desktop-height: "1080";
     in-out property <string> desktop-scale: "100";
     in-out property <string> delete-id;
+    in-out property <string> menu-id;
+    in-out property <string> menu-name;
+    in-out property <bool> menu-favorite;
+    in-out property <bool> password-visible: false;
+    in property <bool> toast-visible: false;
+    in property <int> toast-revision: 0;
+    property <bool> wide: root.width >= 840px;
+    callback system-theme(bool);
+    public function navigate(index: int) {
+        root.page = index == 2 ? 3 : 0;
+        if index != 2 { root.favorites-only = index == 1; root.filter-changed(); }
+    }
 
     callback new-device();
     callback edit-device(string);
@@ -65,6 +80,7 @@ export component MainWindow inherits Window {
     callback pointer(int, int, float, float, int);
     callback wheel(float, float);
     callback viewport(float, float);
+    callback display-mode(bool);
     callback key(string, bool, bool, bool, bool, bool) -> bool;
     callback ime-key(string, bool, bool, bool, bool, bool) -> bool;
     callback committed-text(string);
@@ -86,112 +102,124 @@ export component MainWindow inherits Window {
         y: root.safe-area-insets.top;
         width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
         height: max(0px, (root.virtual-keyboard-size.height > 0px ? min(root.height - root.safe-area-insets.bottom, root.virtual-keyboard-position.y) : root.height - root.safe-area-insets.bottom) - root.safe-area-insets.top);
-    if root.page != 2: VerticalLayout {
-        padding: 20px; spacing: 14px;
-        HorizontalLayout {
-            height: 48px;
-            Text { min-width: 0px; text: root.page == 1 ? "电脑连接" : root.page == 3 ? "设置" : "Windows 设备"; color: root.ink; font-size: 26px; font-weight: 700; vertical-alignment: center; }
-            Button { width: 92px; text: root.page == 0 ? "＋ 添加" : "返回"; height: 44px; enabled: root.page != 0 || root.storage-ready;
-                clicked => { if root.page == 0 { root.new-device(); } else if root.page == 1 { root.leave-editor(); } else { root.page = 0; } }
-            }
+    if root.page != 2: Rectangle {
+        if root.wide && root.page != 1: Navigation {
+            x: 0px; y: 0px; width: 88px; height: parent.height; rail: true;
+            current: root.page == 3 ? 2 : root.favorites-only ? 1 : 0;
+            selected(i) => { root.navigate(i); }
         }
-        if root.status != "": Text { vertical-stretch: 0; min-width: 0px; text: root.status; color: root.error ? #c03932 : root.muted; wrap: word-wrap; }
-        if root.page == 0: VerticalLayout { vertical-stretch: 1;
-            spacing: 14px;
-            search-field := LineEdit { text <=> root.search; placeholder-text: "搜索名称、主机或账号"; height: 48px; vertical-stretch: 0; edited => { root.filter-changed(); } }
-            if root.devices.length == 0: VerticalLayout { vertical-stretch: 1;
-                alignment: center; spacing: 12px;
-                Text { min-width: 0px; text: root.search != "" ? "没有匹配的设备" : root.favorites-only ? "还没有收藏的设备" : "你的 Windows，随时连接"; color: root.ink; font-size: 22px; horizontal-alignment: center; wrap: word-wrap; }
-                Text { min-width: 0px; text: "添加一台电脑，通过现有网络或 VPN 连接。"; color: root.muted; horizontal-alignment: center; wrap: word-wrap; }
+        VerticalLayout {
+            x: root.wide && root.page != 1 ? 88px : 0px;
+            width: parent.width - self.x;
+            spacing: 0px;
+            HorizontalLayout { padding-left: 20px; padding-right: 20px; padding-top: 20px; padding-bottom: 20px; height: 88px; spacing: 12px;
+                if root.page == 1: Button { width: 48px; height: 48px; quiet: true; icon: @image-url("icons/back.svg"); accessible-label: "返回"; clicked => { root.leave-editor(); } }
+                Text { text: root.page == 1 ? "电脑连接" : root.page == 3 ? "设置" : root.favorites-only ? "收藏" : "设备"; font-size: 26px; font-weight: 700; color: root.ink; vertical-alignment: center; min-width: 0px; }
+                if root.page == 0: Button { width: 100px; height: 48px; text: "添加"; icon: @image-url("icons/plus.svg"); primary: true; enabled: root.storage-ready; clicked => { root.new-device(); } }
             }
-            if root.devices.length > 0: ScrollView { vertical-stretch: 1; mouse-drag-pan-enabled: true;
-                viewport-width: self.visible-width;
-                VerticalLayout {
-                    spacing: 12px;
-                    for device in root.devices: Rectangle {
-                        background: root.surface; border-radius: 16px; min-height: 158px;
-                        VerticalLayout {
-                            padding: 16px; spacing: 10px;
-                            HorizontalLayout {
-                                Text { text: "▣"; font-size: 30px; color: #2867d8; width: 40px; }
-                                VerticalLayout {
-                                    Text { min-width: 0px; text: device.name; color: root.ink; font-size: 18px; font-weight: 600; overflow: elide; }
-                                    Text { min-width: 0px; text: device.endpoint + " · " + device.username; color: root.muted; overflow: elide; }
-                                }
-                                Button { text: device.favorite ? "★" : "☆"; width: 44px; height: 44px; clicked => { root.toggle-favorite(device.id); } }
+            if root.error && root.status != "": Rectangle {
+                height: error-label.preferred-height + 24px;
+                background: Theme.dark ? #3c2428 : #fff0ef;
+                error-label := Text { x: 20px; y: 12px; width: parent.width - 40px; text: root.status; color: Theme.danger; wrap: word-wrap; font-size: 13px; }
+            }
+            if root.page == 0: HorizontalLayout {
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout { max-width: 960px; horizontal-stretch: 100; padding-left: 20px; padding-right: 20px; spacing: 16px;
+                    Rectangle { height: 48px;
+                        LineEdit { icon: @image-url("icons/search.svg"); text <=> root.search; placeholder-text: "搜索名称、主机或账号"; edited => { root.filter-changed(); } }
+                    }
+                    HorizontalLayout { height: 20px;
+                        Text { text: root.favorites-only ? "已收藏的电脑" : "我的电脑"; color: root.muted; font-size: 13px; }
+                        Text { text: root.devices.length + " 台"; color: root.muted; font-size: 13px; horizontal-alignment: right; }
+                    }
+                    if root.devices.length == 0: VerticalLayout { alignment: center; spacing: 16px;
+                        Image { source: @image-url("icons/computer.svg"); height: 52px; colorize: Theme.accent; }
+                        Text { text: root.search != "" ? "没有找到设备" : root.favorites-only ? "常用电脑，一触即达" : "你的电脑，随时连接"; font-size: 20px; color: root.ink; horizontal-alignment: center; wrap: word-wrap; }
+                        Text { text: root.search != "" ? "尝试其他名称、主机或账号" : root.favorites-only ? "在设备菜单中收藏常用电脑" : "添加电脑，通过现有网络或 VPN 访问"; color: root.muted; font-size: 13px; horizontal-alignment: center; wrap: word-wrap; }
+                    }
+                    if root.devices.length > 0: ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                        VerticalLayout { spacing: 12px;
+                            for device in root.devices: DeviceCard {
+                                name: device.name; endpoint: device.endpoint; username: device.username; favorite: device.favorite;
+                                connect => { root.connect-device(device.id); }
+                                more => { root.menu-id = device.id; root.menu-name = device.name; root.menu-favorite = device.favorite; }
                             }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Button { min-width: 0px; text: "连接"; height: 44px; clicked => { root.connect-device(device.id); } }
-                                Button { min-width: 0px; text: "编辑"; height: 44px; clicked => { root.edit-device(device.id); } }
-                                Button { min-width: 0px; text: "删除"; height: 44px; clicked => { root.delete-id = device.id; } }
-                            }
+                            Rectangle { vertical-stretch: 1; }
                         }
                     }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                }
-            }
-            HorizontalLayout {
-                height: 52px; spacing: 8px;
-                Button { min-width: 0px; text: "设备"; clicked => { root.favorites-only = false; root.filter-changed(); } }
-                Button { min-width: 0px; text: "收藏"; clicked => { root.favorites-only = true; root.filter-changed(); } }
-                Button { min-width: 0px; text: "设置"; clicked => { root.page = 3; } }
-            }
-        }
-        if root.page == 1: ScrollView { mouse-drag-pan-enabled: true;
-            viewport-width: self.visible-width;
-            HorizontalLayout {
-                Rectangle { horizontal-stretch: 1; }
-                VerticalLayout {
-                    max-width: 640px; horizontal-stretch: 20; spacing: 12px;
-                    Text { min-width: 0px; text: "连接信息"; color: root.ink; font-size: 20px; }
-                    LineEdit { text <=> root.device-name; placeholder-text: "显示名称（可选）"; height: 44px; }
-                    LineEdit { text <=> root.host; placeholder-text: "电脑名称或 IP 地址"; height: 44px; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { min-width: 0px; text: "端口"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.port; input-type: number; height: 44px; }
-                    }
-                    LineEdit { text <=> root.username; placeholder-text: "用户名或 域\\用户名"; height: 44px; }
-                    LineEdit { text <=> root.password; placeholder-text: "连接密码"; input-type: InputType.password; height: 44px; }
-                    CheckBox { text: "在此设备安全保存密码"; checked <=> root.remember-password; }
-                    Text { min-width: 0px; text: "默认每次连接时输入密码。"; color: root.muted; wrap: word-wrap; }
-                    Text { min-width: 0px; text: "显示与输入"; color: root.ink; font-size: 20px; }
-                    CheckBox { text: "自动适配会话区域的分辨率"; checked <=> root.dynamic-resolution; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        LineEdit { text <=> root.desktop-width; placeholder-text: "宽度"; input-type: number; height: 44px; }
-                        Text { min-width: 0px; text: "×"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.desktop-height; placeholder-text: "高度"; input-type: number; height: 44px; }
-                    }
-                    HorizontalLayout {
-                        Text { min-width: 0px; text: "远端缩放 %"; color: root.ink; vertical-alignment: center; }
-                        LineEdit { text <=> root.desktop-scale; input-type: number; height: 44px; }
-                    }
-                    CheckBox { text: "默认使用直接触控"; checked <=> root.direct-touch; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Button { min-width: 0px; text: "保存"; enabled: root.storage-ready; height: 48px; clicked => { root.save-device(false); } }
-                        Button { min-width: 0px; text: "保存并连接"; enabled: root.storage-ready; height: 48px; clicked => { root.save-device(true); } }
-                    }
-                    Rectangle { min-height: 16px; }
+                    Rectangle { height: 8px; }
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
-        }
-        if root.page == 3: ScrollView { mouse-drag-pan-enabled: true; viewport-width: self.visible-width; VerticalLayout {
-            spacing: 16px;
-            Text { min-width: 0px; text: "外观"; color: root.ink; font-size: 20px; }
-            CheckBox { text: "深色外观"; checked <=> root.dark; }
-            Text { min-width: 0px; text: "连接与隐私"; color: root.ink; font-size: 20px; }
-            Text { min-width: 0px; text: "设备信息在本机加密保存。记住密码需在每台设备的编辑页中开启。证书变化时会再次请求确认。"; color: root.muted; wrap: word-wrap; }
-            Text { min-width: 0px; text: "使用帮助"; color: root.ink; font-size: 20px; }
-            Text { min-width: 0px; text: "鼠标模式：滑动移动，轻点左键，长按右键，双击按住拖拽。双指上下滑动滚动，捏合缩放。平移模式只移动画面。"; color: root.muted; wrap: word-wrap; }
-            Rectangle { vertical-stretch: 1; }
-        }
+            if root.page == 1: ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                HorizontalLayout { padding-left: 20px; padding-right: 20px;
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { max-width: 640px; horizontal-stretch: 100; spacing: 16px;
+                        Text { text: "连接信息"; font-size: 18px; color: root.ink; }
+                        Field { label: "显示名称"; placeholder: "例如：办公室电脑"; text <=> root.device-name; }
+                        Field { label: "主机"; placeholder: "电脑名称或 IP 地址"; text <=> root.host; }
+                        Field { label: "端口"; input-type: number; text <=> root.port; }
+                        Text { text: "凭据"; font-size: 18px; color: root.ink; }
+                        Field { label: "账号"; placeholder: "用户名或 域\\用户名"; text <=> root.username; }
+                        Text { text: "密码"; color: root.muted; font-size: 13px; }
+                        HorizontalLayout { spacing: 8px; height: 48px;
+                            LineEdit { text <=> root.password; placeholder-text: "输入连接密码"; input-type: root.password-visible ? InputType.text : InputType.password; }
+                            Button { width: 48px; icon: @image-url("icons/eye.svg"); selected: root.password-visible; accessible-label: root.password-visible ? "隐藏密码" : "显示密码"; clicked => { root.password-visible = !root.password-visible; } }
+                        }
+                        CheckBox { text: "在此设备安全保存密码"; checked <=> root.remember-password; }
+                        Text { text: "默认每次连接时输入密码。"; color: root.muted; font-size: 13px; }
+                        Rectangle { height: 1px; background: Theme.line; }
+                        Text { text: "显示与输入"; font-size: 18px; color: root.ink; }
+                        CheckBox { text: "跟随屏幕分辨率"; checked <=> root.dynamic-resolution; }
+                        Text { text: "关闭后保持横向分辨率，可缩放和平移画面。"; color: root.muted; font-size: 13px; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 12px;
+                            Field { label: "宽度"; input-type: number; text <=> root.desktop-width; }
+                            Field { label: "高度"; input-type: number; text <=> root.desktop-height; }
+                        }
+                        Field { label: "远端缩放 (%)"; input-type: number; text <=> root.desktop-scale; }
+                        CheckBox { text: "默认使用直接触控"; checked <=> root.direct-touch; }
+                        HorizontalLayout { spacing: 12px; height: 48px;
+                            Button { text: "保存"; enabled: root.storage-ready; clicked => { root.save-device(false); } }
+                            Button { text: "保存并连接"; primary: true; enabled: root.storage-ready; clicked => { root.save-device(true); } }
+                        }
+                        Rectangle { height: 24px; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+            if root.page == 3: ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                HorizontalLayout { padding-left: 20px; padding-right: 20px;
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { max-width: 640px; horizontal-stretch: 100; spacing: 16px; alignment: start;
+                        Text { text: "外观"; color: root.muted; font-size: 13px; }
+                        Rectangle { height: 76px; background: root.surface; border-radius: 16px;
+                            CheckBox { x: 16px; y: 12px; width: parent.width - 32px; height: 52px; text: "深色外观"; checked <=> root.dark; }
+                        }
+                        Text { text: "连接与隐私"; color: root.muted; font-size: 13px; }
+                        Rectangle { height: privacy.preferred-height; background: root.surface; border-radius: 16px;
+                            privacy := VerticalLayout { padding: 20px; spacing: 12px;
+                                Text { text: "安全保存在本机"; font-size: 18px; color: root.ink; }
+                                Text { text: "设备信息加密保存。密码仅在你开启记住密码后保存；电脑证书变化时会再次确认。"; color: root.muted; wrap: word-wrap; }
+                            }
+                        }
+                        Text { text: "使用帮助"; color: root.muted; font-size: 13px; }
+                        Rectangle { height: help.preferred-height; background: root.surface; border-radius: 16px;
+                            help := VerticalLayout { padding: 20px; spacing: 12px;
+                                Text { text: "用熟悉的方式操作"; font-size: 18px; color: root.ink; }
+                                Text { text: "鼠标模式：滑动移动指针，轻点左键，长按右键，双击按住拖拽。\n\n双指滚动，捏合缩放；平移只移动观看区域。会话右上角菜单可切换输入和显示模式。"; color: root.muted; wrap: word-wrap; }
+                            }
+                        }
+                        Rectangle { height: 20px; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+            if !root.wide && root.page != 1: Navigation { height: 76px;
+                current: root.page == 3 ? 2 : root.favorites-only ? 1 : 0;
+                selected(i) => { root.navigate(i); }
+            }
         }
     }
-
     remote-focus := FocusScope {
         visible: root.page == 2;
         enabled: root.page == 2;
@@ -203,16 +231,8 @@ export component MainWindow inherits Window {
             background: #090c12;
             VerticalLayout {
                 spacing: 0px;
-                HorizontalLayout {
-                    padding: 6px; spacing: 6px; height: 52px;
-                    Text { min-width: 0px; text: root.session-name; color: #ffffff; overflow: elide; vertical-alignment: center; }
-                    Button { min-width: 0px; text: "键盘"; enabled: root.connected; clicked => { root.keyboard-visible = !root.keyboard-visible; if root.keyboard-visible { root.focus-keyboard(); } else { root.focus-session(); } } }
-                    Button { min-width: 0px; text: root.direct-touch ? "触控" : "鼠标"; clicked => { root.direct-touch = !root.direct-touch; root.input-mode-changed(); root.focus-session(); } }
-                    Button { min-width: 0px; text: "断开"; clicked => { root.disconnect(); } }
-                }
-                Text { min-width: 0px; text: root.status; color: root.error ? #ff938c : #b9c8dd; wrap: word-wrap; }
                 canvas := Rectangle {
-                    background: #090c12; clip: true; vertical-stretch: 1; min-height: 40px;
+                    background: #090c12; clip: true; vertical-stretch: 1; min-height: 48px;
                     changed width => { root.viewport(self.width / 1px, self.height / 1px); }
                     changed height => { root.viewport(self.width / 1px, self.height / 1px); }
                     Image { source: root.remote-image; x: root.image-x * 1px; y: root.image-y * 1px; width: root.image-width * 1px; height: root.image-height * 1px; image-fit: fill; }
@@ -227,15 +247,10 @@ export component MainWindow inherits Window {
                         scroll-event(e) => { root.wheel(e.delta-x / 1px, e.delta-y / 1px); return accept; }
                     }
                 }
-                HorizontalLayout {
-                    height: 48px; spacing: 6px; padding: 4px;
-                    Button { min-width: 0px; text: root.pan-mode ? "平移中" : "平移"; clicked => { root.pan-mode = !root.pan-mode; root.input-mode-changed(); } }
-                    Button { min-width: 0px; text: "适合屏幕"; clicked => { root.reset-view(); } }
-                    Button { min-width: 0px; text: "剪贴板"; enabled: root.connected; clicked => { root.clipboard-visible = !root.clipboard-visible; } }
-                }
                 if root.clipboard-visible: VerticalLayout {
                     padding: 8px; spacing: 6px;
-                    LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; height: 44px; }
+                    Button { text: "关闭剪贴板"; height: 48px; clicked => { root.clipboard-visible = false; root.focus-session(); } }
+                    LineEdit { text <=> root.clipboard; placeholder-text: "纯文本剪贴板"; height: 48px; }
                     HorizontalLayout {
                         Button { min-width: 0px; text: "读本机"; clicked => { root.read-local-clipboard(); } }
                         Button { min-width: 0px; text: "发远端"; clicked => { root.send-clipboard(); } }
@@ -245,7 +260,7 @@ export component MainWindow inherits Window {
                 }
                 HorizontalLayout {
                     visible: root.keyboard-visible;
-                    height: root.keyboard-visible ? 46px : 0px;
+                    height: root.keyboard-visible ? 48px : 0px;
                     spacing: 4px;
                     Button { min-width: 0px; text: "Esc"; clicked => { root.special-key("Escape"); } }
                     Button { min-width: 0px; text: "Tab"; clicked => { root.special-key("Tab"); } }
@@ -275,40 +290,105 @@ export component MainWindow inherits Window {
         }
     }
 
-    if root.pending-fingerprint != "": Rectangle {
-        background: #99000000;
-        VerticalLayout {
-            padding: 24px; alignment: center;
-            Rectangle {
-                background: root.surface; border-radius: 16px;
-                VerticalLayout {
-                    padding: 20px; spacing: 16px;
-                    Text { min-width: 0px; text: root.certificate-changed ? "注意：电脑证书已变化" : "确认电脑身份"; color: root.certificate-changed ? #c03932 : root.ink; font-size: 22px; wrap: word-wrap; }
-                    Text { min-width: 0px; text: root.certificate-target; color: root.ink; wrap: word-wrap; }
-                    Text { min-width: 0px; text: "请与电脑管理员核对 SHA-256 指纹后继续。"; color: root.muted; wrap: word-wrap; }
-                    Text { min-width: 0px; text: root.pending-fingerprint; color: root.ink; wrap: char-wrap; font-size: 13px; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Button { min-width: 0px; text: "取消"; height: 48px; clicked => { root.reject-certificate(); } }
-                        Button { min-width: 0px; text: "信任并连接"; height: 48px; clicked => { root.trust-certificate(); } }
-                    }
+    if root.page == 2: Button {
+        x: parent.width - self.width - 10px; y: 10px; width: 96px; height: 48px;
+        text: root.session-menu-visible ? "收起" : "菜单";
+        icon: root.session-menu-visible ? @image-url("icons/close.svg") : @image-url("icons/more.svg");
+        clicked => { root.release-input(); root.session-menu-visible = !root.session-menu-visible; }
+    }
+    if root.page == 2 && (!root.connected || root.error): Rectangle {
+        x: 10px; y: 10px; width: max(0px, parent.width - 118px);
+        height: session-status.preferred-height + 16px;
+        background: #202936ed; border-radius: 10px;
+        session-status := Text { x: 8px; y: 8px; width: parent.width - 16px; text: root.status; color: root.error ? #ff938c : #ffffff; wrap: word-wrap; }
+        TouchArea { }
+    }
+    if root.page == 2 && root.session-menu-visible: Rectangle {
+        x: parent.width - self.width - 10px; y: 62px;
+        width: min(340px, parent.width - 20px); height: min(418px, parent.height - 72px);
+        background: root.surface; border-radius: 16px; clip: true;
+        TouchArea { } // Consume input over the menu instead of forwarding it to the desktop.
+        ScrollView { mouse-drag-pan-enabled: true; viewport-width: self.visible-width;
+            VerticalLayout { padding: 14px; spacing: 10px; alignment: start;
+                Text { text: root.session-name; color: root.ink; font-size: 18px; overflow: elide; min-width: 0px; }
+                Text { text: root.status; color: root.error ? #c03932 : root.muted; wrap: word-wrap; min-width: 0px; }
+                HorizontalLayout { spacing: 8px;
+                    Button { min-width: 0px; height: 48px; text: root.keyboard-visible ? "收起键盘" : "键盘"; icon: @image-url("icons/keyboard.svg"); enabled: root.connected;
+                        clicked => { root.keyboard-visible = !root.keyboard-visible; root.session-menu-visible = false; if root.keyboard-visible { root.focus-keyboard(); } else { root.focus-session(); } } }
+                    Button { min-width: 0px; height: 48px; text: root.direct-touch ? "触控" : "鼠标"; icon: @image-url("icons/mouse.svg");
+                        clicked => { root.direct-touch = !root.direct-touch; root.input-mode-changed(); } }
+                }
+                Text { text: "远程分辨率"; color: root.muted; }
+                HorizontalLayout { spacing: 8px;
+                    Button { min-width: 0px; height: 48px; text: "跟随屏幕"; selected: root.dynamic-resolution; enabled: root.connected; clicked => { root.display-mode(true); } }
+                    Button { min-width: 0px; height: 48px; text: "保持横向"; selected: !root.dynamic-resolution; enabled: root.connected; clicked => { root.display-mode(false); } }
+                }
+                Text { text: "横向模式使用设备配置的宽高；竖屏时可捏合放大、平移查看。"; color: root.muted; wrap: word-wrap; min-width: 0px; }
+                HorizontalLayout { spacing: 8px;
+                    Button { min-width: 0px; height: 48px; text: "平移"; selected: root.pan-mode; icon: @image-url("icons/pan.svg"); clicked => { root.pan-mode = !root.pan-mode; root.input-mode-changed(); root.session-menu-visible = false; root.focus-session(); } }
+                    Button { min-width: 0px; height: 48px; text: "适合屏幕"; icon: @image-url("icons/fit.svg"); clicked => { root.reset-view(); root.session-menu-visible = false; root.focus-session(); } }
+                }
+                HorizontalLayout { spacing: 8px;
+                    Button { min-width: 0px; height: 48px; text: "剪贴板"; icon: @image-url("icons/clipboard.svg"); enabled: root.connected; clicked => { root.clipboard-visible = !root.clipboard-visible; root.session-menu-visible = false; } }
+                    Button { min-width: 0px; height: 48px; text: "断开连接"; danger: true; icon: @image-url("icons/power.svg"); clicked => { root.session-menu-visible = false; root.disconnect(); } }
+                }
+            }
+        }
+    }
+    if root.page != 2 && root.toast-visible && !root.error && root.status != "": Rectangle {
+        x: 20px; y: max(0px, parent.height - (root.page == 1 ? 76px : 144px)); width: parent.width - 40px;
+        height: toast.preferred-height + 24px; background: Theme.ink; border-radius: 12px;
+        toast := Text { x: 16px; y: 12px; width: parent.width - 32px; text: root.status; color: Theme.surface; wrap: word-wrap; font-size: 13px; }
+    }
+    if root.menu-id != "": Rectangle {
+        background: #00000066;
+        TouchArea { clicked => { root.menu-id = ""; } }
+        Rectangle {
+            x: (parent.width - self.width)/2; y: max(12px, (parent.height - self.height)/2);
+            width: min(360px, parent.width - 40px); height: min(300px, parent.height - 24px);
+            background: root.surface; border-radius: 16px;
+            TouchArea { }
+            ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                VerticalLayout { padding: 16px; spacing: 8px; alignment: start;
+                    Text { text: root.menu-name; color: root.ink; font-size: 18px; overflow: elide; min-width: 0px; }
+                    Button { text: "编辑设备"; quiet: true; icon: @image-url("icons/edit.svg"); clicked => { root.edit-device(root.menu-id); root.menu-id = ""; } }
+                    Button { text: root.menu-favorite ? "取消收藏" : "收藏设备"; quiet: true; icon: @image-url("icons/star.svg"); clicked => { root.toggle-favorite(root.menu-id); root.menu-id = ""; } }
+                    Button { text: "删除设备"; quiet: true; danger: true; icon: @image-url("icons/delete.svg"); clicked => { root.delete-id = root.menu-id; root.menu-id = ""; } }
+                    Button { text: "取消"; clicked => { root.menu-id = ""; } }
+                }
+            }
+        }
+    }    if root.pending-fingerprint != "": Rectangle {
+        background: #00000066; TouchArea { }
+        Rectangle { x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+            width: min(480px, parent.width - 40px); height: min(460px, parent.height - 24px);
+            background: root.surface; border-radius: 16px;
+            TouchArea { }
+            ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                VerticalLayout { padding: 20px; spacing: 16px; alignment: start;
+                    Image { source: @image-url("icons/shield.svg"); height: 32px; colorize: root.certificate-changed ? Theme.danger : Theme.accent; }
+                    Text { text: root.certificate-changed ? "电脑证书已变化" : "确认电脑身份"; color: root.certificate-changed ? Theme.danger : root.ink; font-size: 22px; wrap: word-wrap; min-width: 0px; }
+                    Text { text: root.certificate-target; color: root.ink; wrap: char-wrap; min-width: 0px; }
+                    Text { text: "请与电脑管理员核对 SHA-256 指纹后继续。"; color: root.muted; wrap: word-wrap; min-width: 0px; }
+                    Text { text: root.pending-fingerprint; color: root.ink; wrap: char-wrap; font-size: 13px; min-width: 0px; }
+                    Button { text: "信任并连接"; primary: true; clicked => { root.trust-certificate(); } }
+                    Button { text: "取消"; clicked => { root.reject-certificate(); } }
                 }
             }
         }
     }
     if root.delete-id != "": Rectangle {
-        background: #99000000;
-        VerticalLayout {
-            padding: 24px; alignment: center;
-            Rectangle {
-                background: root.surface; border-radius: 16px;
-                VerticalLayout {
-                    padding: 20px; spacing: 16px;
-                    Text { min-width: 0px; text: "删除这台设备及其保存的密码？"; color: root.ink; wrap: word-wrap; }
-                    HorizontalLayout {
-                        Button { min-width: 0px; text: "取消"; clicked => { root.delete-id = ""; } }
-                        Button { min-width: 0px; text: "删除"; clicked => { root.delete-device(root.delete-id); root.delete-id = ""; } }
-                    }
+        background: #00000066; TouchArea { }
+        Rectangle { x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+            width: min(400px, parent.width - 40px); height: min(300px, parent.height - 24px);
+            background: root.surface; border-radius: 16px;
+            TouchArea { }
+            ScrollView { viewport-width: self.visible-width; mouse-drag-pan-enabled: true;
+                VerticalLayout { padding: 20px; spacing: 16px; alignment: start;
+                    Text { text: "删除设备？"; color: root.ink; font-size: 22px; }
+                    Text { text: "“" + root.menu-name + "”及本机保存的密码将被删除。"; color: root.muted; wrap: word-wrap; min-width: 0px; }
+                    Button { text: "删除设备"; danger: true; icon: @image-url("icons/delete.svg"); clicked => { root.delete-device(root.delete-id); root.delete-id = ""; } }
+                    Button { text: "取消"; clicked => { root.delete-id = ""; } }
                 }
             }
         }

@@ -1,0 +1,119 @@
+export global Theme {
+    in-out property <bool> dark: false;
+    out property <color> background: dark ? #11151c : #f5f6f8;
+    out property <color> surface: dark ? #1c222c : #ffffff;
+    out property <color> ink: dark ? #f1f4f9 : #19212f;
+    out property <color> muted: dark ? #a7b2c3 : #647084;
+    out property <color> line: dark ? #323b49 : #e4e8ef;
+    out property <color> accent: dark ? #79b3ff : #0067c0;
+    out property <color> tint: dark ? #233a55 : #eaf3fc;
+    out property <color> danger: dark ? #ff9b97 : #b42329;
+}
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> quiet: false;
+    in property <bool> selected: false;
+    in property <bool> danger: false;
+    in property <bool> stacked: false;
+    callback clicked();
+    min-width: 0px; min-height: 48px; preferred-height: 48px; vertical-stretch: 0;
+    border-radius: 10px;
+    background: !enabled ? Theme.line : touch.pressed ? (primary ? #00549e : Theme.tint) : primary ? #0067c0 : selected ? Theme.tint : quiet ? transparent : Theme.surface;
+    border-width: focus.has-focus ? 2px : quiet || primary || selected ? 0px : 1px;
+    border-color: focus.has-focus ? Theme.accent : Theme.line;
+    opacity: enabled ? 1 : 0.5;
+    forward-focus: focus;
+    accessible-role: button; accessible-label: text; accessible-enabled: enabled;
+    focus := FocusScope { enabled: root.enabled;
+        key-pressed(e) => { if e.text == " " || e.text == "\n" { root.clicked(); return accept; } return reject; }
+    }
+    if root.stacked: Image { x: (parent.width - 22px)/2; y: 8px; source: root.icon; width: 22px; height: 22px; colorize: root.selected ? Theme.accent : Theme.muted; }
+    if root.stacked: Text { x: 0px; y: 34px; width: parent.width; height: 20px; text: root.text; font-size: 12px; color: root.selected ? Theme.accent : Theme.muted; horizontal-alignment: center; }
+    if !root.stacked: HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 8px; alignment: center;
+        if root.icon.width > 0: Rectangle { width: 20px; horizontal-stretch: 0; Image { x: 0px; y: (parent.height - 20px)/2; source: root.icon; width: 20px; height: 20px; colorize: root.primary ? white : root.danger ? Theme.danger : root.selected ? Theme.accent : Theme.ink; } }
+        if root.text != "": Text { min-width: 0px; text: root.text; overflow: elide; color: root.primary ? white : root.danger ? Theme.danger : root.selected ? Theme.accent : Theme.ink; vertical-alignment: center; horizontal-alignment: center; }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+}
+export component LineEdit inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder-text;
+    in property <string> label: placeholder-text;
+    in property <image> icon;
+    in property <InputType> input-type: InputType.text;
+    in property <bool> enabled: true;
+    callback edited();
+    preferred-height: 48px; min-width: 0px; vertical-stretch: 0;
+    background: Theme.surface; border-radius: 10px;
+    border-width: input.has-focus ? 2px : 1px; border-color: input.has-focus ? Theme.accent : Theme.line;
+    forward-focus: input;
+    if root.icon.width > 0: Image { x: 14px; y: (parent.height - 20px)/2; width: 20px; height: 20px; source: root.icon; colorize: Theme.muted; }
+    input := TextInput { accessible-label: root.label; x: root.icon.width > 0 ? 42px : 14px; y: 0px; width: parent.width - self.x - 14px; height: parent.height;
+        text <=> root.text; input-type: root.input-type; enabled: root.enabled;
+        color: Theme.ink; selection-background-color: Theme.accent; selection-foreground-color: white;
+        single-line: true; vertical-alignment: center;
+        edited => { root.edited(); }
+    }
+    if root.text == "" && !input.has-focus: Text { x: root.icon.width > 0 ? 42px : 14px; width: parent.width - self.x - 14px; height: parent.height; text: root.placeholder-text; color: Theme.muted; vertical-alignment: center; overflow: elide; }
+}
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <InputType> input-type: InputType.text;
+    in-out property <string> text;
+    spacing: 6px; vertical-stretch: 0;
+    Text { text: root.label; color: Theme.muted; font-size: 13px; }
+    LineEdit { label: root.label; text <=> root.text; placeholder-text: root.placeholder; input-type: root.input-type; height: 48px; }
+}
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    preferred-height: max(52px, label.preferred-height + 20px); min-width: 0px; vertical-stretch: 0;
+    forward-focus: focus;
+    accessible-role: checkbox; accessible-label: text; accessible-checked: checked;
+    border-radius: 10px; border-width: focus.has-focus ? 2px : 0px; border-color: Theme.accent;
+    focus := FocusScope { key-pressed(e) => { if e.text == " " { root.checked = !root.checked; return accept; } return reject; } }
+    label := Text { x: 0px; y: (parent.height - self.height)/2; width: parent.width - 66px; text: root.text; color: Theme.ink; wrap: word-wrap; }
+    Rectangle { x: parent.width - 48px; y: (parent.height - 28px)/2; width: 46px; height: 28px; border-radius: 14px; background: root.checked ? #0067c0 : Theme.line;
+        Rectangle { x: root.checked ? 21px : 3px; y: 3px; width: 22px; height: 22px; border-radius: 11px; background: white; }
+    }
+    TouchArea { clicked => { focus.focus(); root.checked = !root.checked; } }
+}
+export component DeviceCard inherits Rectangle {
+    in property <string> name;
+    in property <string> endpoint;
+    in property <string> username;
+    in property <bool> favorite;
+    callback connect(); callback more();
+    height: 116px; min-width: 0px; border-radius: 16px; background: Theme.surface;
+    Button { width: parent.width - 60px; height: parent.height; quiet: true; accessible-label: "连接 " + root.name; clicked => { root.connect(); } }
+    Rectangle { x: 16px; y: 24px; width: 48px; height: 48px; border-radius: 12px; background: Theme.tint;
+        Image { x: 12px; y: 12px; width: 24px; height: 24px; source: @image-url("icons/computer.svg"); colorize: Theme.accent; }
+    }
+    VerticalLayout { x: 80px; y: 18px; width: max(0px, parent.width - 148px); height: 80px; spacing: 4px; alignment: start;
+        Text { text: root.name; color: Theme.ink; font-size: 18px; overflow: elide; min-width: 0px; }
+        Text { text: root.endpoint; color: Theme.muted; font-size: 13px; overflow: elide; min-width: 0px; }
+        Text { text: root.username; color: Theme.muted; font-size: 13px; overflow: elide; min-width: 0px; }
+    }
+    Button { x: parent.width - 56px; y: 8px; width: 48px; height: 48px; quiet: true; icon: @image-url("icons/more.svg"); accessible-label: "设备操作"; clicked => { root.more(); } }
+    if root.favorite: Image { x: parent.width - 41px; y: 76px; width: 18px; height: 18px; source: @image-url("icons/star.svg"); colorize: Theme.accent; }
+}
+export component Navigation inherits Rectangle {
+    in property <int> current;
+    in property <bool> rail: false;
+    callback selected(int);
+    background: Theme.surface;
+    if root.rail: VerticalLayout { padding: 12px; spacing: 8px; alignment: start;
+        for item[i] in [{name: "设备", icon: @image-url("icons/computer.svg")}, {name: "收藏", icon: @image-url("icons/star.svg")}, {name: "设置", icon: @image-url("icons/settings.svg")}]: Button {
+            text: item.name; icon: item.icon; quiet: true; selected: root.current == i; height: 64px; stacked: true; clicked => { root.selected(i); }
+        }
+    }
+    if !root.rail: HorizontalLayout { padding: 8px; spacing: 12px;
+        for item[i] in [{name: "设备", icon: @image-url("icons/computer.svg")}, {name: "收藏", icon: @image-url("icons/star.svg")}, {name: "设置", icon: @image-url("icons/settings.svg")}]: Button {
+            text: item.name; icon: item.icon; quiet: true; selected: root.current == i; stacked: true; clicked => { root.selected(i); }
+        }
+    }
+}

@@ -302,3 +302,24 @@ mod tests {
         assert!(NativePlatform.unprotect(&protected).is_err());
     }
 }
+
+pub fn set_system_theme(dark: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android_call("设置系统栏主题", |env, activity| {
+            env.call_method(
+                activity,
+                "setSystemTheme",
+                "(Z)V",
+                &[jni::objects::JValue::Bool(dark.into())],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = dark;
+        Ok(())
+    }
+}

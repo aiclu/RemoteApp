@@ -33,6 +33,7 @@ struct AppModel {
     latched: HashMap<String, KeyCode>,
     dynamic_resolution: bool,
     desktop_scale: u32,
+    landscape_size: (u16, u16),
     resize: Option<(Instant, u16, u16)>,
     last_size: Option<(u16, u16)>,
     last_frame: (u64, u64),
@@ -46,17 +47,50 @@ impl AppModel {
             ime_previous: String::new(),
             pressed: HashMap::new(),
             latched: HashMap::new(),
-            dynamic_resolution: true,
+            dynamic_resolution: false,
             desktop_scale: 100,
+            landscape_size: (1920, 1080),
             resize: None,
             last_size: None,
             last_frame: (0, 0),
         }
     }
 }
+fn landscape_size(width: u16, height: u16) -> (u16, u16) {
+    (width.max(height).max(320), width.min(height).max(200))
+}
+fn display_size(
+    follow: bool,
+    landscape: (u16, u16),
+    width: f32,
+    height: f32,
+    scale: f32,
+) -> (u16, u16) {
+    if follow {
+        (
+            (width * scale).round().clamp(320., 8192.) as u16,
+            (height * scale).round().clamp(200., 8192.) as u16,
+        )
+    } else {
+        landscape
+    }
+}
 fn feedback(ui: &MainWindow, text: impl Into<slint::SharedString>, error: bool) {
     ui.set_status(text.into());
     ui.set_error(error);
+    let revision = ui.get_toast_revision().wrapping_add(1);
+    ui.set_toast_revision(revision);
+    ui.set_toast_visible(!error && !ui.get_status().is_empty());
+    if !error {
+        let weak = ui.as_weak();
+        Timer::single_shot(Duration::from_secs(3), move || {
+            if let Some(ui) = weak.upgrade() {
+                if ui.get_toast_revision() == revision {
+                    ui.set_toast_visible(false);
+                }
+            }
+        });
+    }
 }
 fn result(ui: &MainWindow, value: Result<(), String>, success: &str) {
     match value {
@@ -116,7 +150,7 @@ fn edit(ui: &MainWindow, model: &mut AppModel, device: Option<Device>) {
         remember_password: false,
         password: None,
         direct_touch: false,
-        dynamic_resolution: true,
+        dynamic_resolution: false,
     });
     model.draft = Some(d.profile.id);
     ui.set_device_name(d.profile.label.clone().into());
@@ -264,6 +298,10 @@ fn launch(
         return Err("请输入连接密码".into());
     }
     let mut profile = device.profile.clone();
+    if !device.dynamic_resolution {
+        (profile.desktop.width, profile.desktop.height) =
+            landscape_size(profile.desktop.width, profile.desktop.height);
+    }
     let fingerprint = model
         .repository
         .as_ref()
@@ -288,6 +326,9 @@ fn launch(
     model.gestures.viewport.remote_width = f32::from(profile.desktop.width);
     model.gestures.viewport.remote_height = f32::from(profile.desktop.height);
     model.dynamic_resolution = device.dynamic_resolution;
+    model.landscape_size = landscape_size(profile.desktop.width, profile.desktop.height);
+    ui.set_dynamic_resolution(device.dynamic_resolution);
+    ui.set_session_menu_visible(false);
     model.desktop_scale = profile.desktop.scale_factor;
     model.last_frame = (0, 0);
     model.last_size = None;
@@ -405,6 +446,12 @@ fn prepare_app(
             ui.$callback(move |$($arg),*|{if let Some($u)=weak.upgrade(){let mut state=model.borrow_mut();let $m=&mut *state;let $c=&controller; $body }});
         }};
     }
+    ui.on_system_theme(|dark| {
+        if let Err(error) = platform::set_system_theme(dark) {
+            eprintln!("System theme: {error}");
+        }
+    });
+    ui.invoke_system_theme(ui.get_dark());
     bind!(on_new_device, |u, m, _c| {
         edit(&u, m, None);
     });
@@ -576,6 +623,27 @@ fn prepare_app(
                 "",
             );
         }
+    });
+    bind!(on_display_mode, |u, m, c, follow| {
+        if !u.get_connected() {
+            return;
+        }
+        release(m, c);
+        m.dynamic_resolution = follow;
+        u.set_dynamic_resolution(follow);
+        let v = &mut m.gestures.viewport;
+        v.zoom = 1.;
+        v.pan_x = 0.;
+        v.pan_y = 0.;
+        let size = display_size(
+            follow,
+            m.landscape_size,
+            v.width,
+            v.height,
+            u.window().scale_factor(),
+        );
+        m.resize = Some((Instant::now(), size.0, size.1));
+        update_view(&u, m);
     });
     bind!(on_viewport, |u, m, _c, width, height| {
         if width < 1. || height < 1. {
@@ -791,11 +859,14 @@ fn prepare_app(
                         ui.set_pending_fingerprint("".into());
                         let width = model.gestures.viewport.width;
                         let height = model.gestures.viewport.height;
-                        if model.dynamic_resolution && width > 1. && height > 1. {
+                        if width > 1. && height > 1. {
                             let scale = ui.window().scale_factor();
-                            let size = (
-                                (width * scale).clamp(320., 8192.) as u16,
-                                (height * scale).clamp(200., 8192.) as u16,
+                            let size = display_size(
+                                model.dynamic_resolution,
+                                model.landscape_size,
+                                width,
+                                height,
+                                scale,
                             );
                             if model.last_size != Some(size) {
                                 model.resize = Some((

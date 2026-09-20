@@ -88,3 +88,21 @@ Debug APK build. Tags such as v0.1.0 also build a signed Release AAB with:
 - vendor/i-slint-backend-android-activity: Slint 1.17.1 with an Android mouse-wheel panic fix.
 
 Noto Sans SC is embedded for Simplified Chinese; its license is alongside the font.
+
+### 会话显示与菜单
+
+会话默认收起工具栏，通过右上角“菜单”访问键盘、输入模式、剪贴板与断开操作。
+菜单浮在远程画面上，不占用画面布局高度，也不会因展开菜单而改变远端分辨率。
+新建设备默认保持配置中的横向分辨率，竖屏查看时可捏合缩放和平移；设备编辑页可开启跟随屏幕。
+会话菜单可临时切换“跟随屏幕”和“保持横向”，下次连接仍使用该设备保存的设置。
+
+### 统一移动端界面
+
+界面使用自定义 Slint 控件与项目内绘制的 SVG 图标，统一浅色、深色主题，避免平台默认按钮外观差异。
+点击设备卡片连接；卡片右侧“更多”包含编辑、收藏及删除，删除需要确认。
+手机采用底部导航，可用窗口宽度达到 840 个逻辑像素时采用侧栏导航。
+编辑表单保留固定标签及显式的密码显示开关；普通操作结果短暂显示，错误持续显示。
+
+本轮预览涵盖窄屏、手机/平板、深色、长名称、空列表、错误、操作菜单和证书弹窗。
+缩短窗口高度的预览只验证滚动布局，不代表真实软键盘验证。
+本地 Android 构建仍受缺少 NDK/Clang 限制；新增系统栏主题代码与真机中文输入尚需设备验证。
